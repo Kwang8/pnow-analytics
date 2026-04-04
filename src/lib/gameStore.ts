@@ -73,7 +73,9 @@ export async function saveGame(
   await setDoc(gameRef, {
     uploadedBy: uid,
     createdAt: serverTimestamp(),
-    gameDate: data.generatedAt,
+    gameDate: data.hands.length > 0
+      ? new Date(data.hands[0].startedAt).toISOString()
+      : data.generatedAt,
     pokerNowGameId: data.gameId,
     totalHands: overall.totalHands,
     bigBlind: overall.bigBlind,
@@ -98,7 +100,9 @@ export async function saveGame(
       pfr: p.pfr,
       handsPlayed: p.handsPlayed,
       bigBlind: overall.bigBlind,
-      gameDate: data.generatedAt,
+      gameDate: data.hands.length > 0
+        ? new Date(data.hands[0].startedAt).toISOString()
+        : data.generatedAt,
       uploadedBy: uid,
     } satisfies GamePlayerDoc);
   }

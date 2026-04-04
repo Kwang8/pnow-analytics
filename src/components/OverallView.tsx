@@ -4,7 +4,7 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
   ReferenceLine, ZAxis, Label, Tooltip,
 } from 'recharts';
-import { findMostSimilarHCL } from '../lib/hclPlayers';
+
 import { useAuth } from '../lib/AuthContext';
 import { claimPlayer } from '../lib/gameStore';
 import { User, Check, Loader2 } from 'lucide-react';
@@ -58,28 +58,6 @@ function ScatterTooltip({ active, payload }: any) {
   );
 }
 
-function HCLMiniAvatar({ player }: { player: import('../lib/hclPlayers').HCLPlayer }) {
-  const [err, setErr] = useState(false);
-  return (
-    <div className="flex items-center gap-2">
-      {err ? (
-        <div className="w-6 h-6 rounded-full bg-bg-hover text-[9px] flex items-center justify-center font-bold text-text-muted shrink-0">
-          {player.nickname.slice(0, 2)}
-        </div>
-      ) : (
-        <img
-          src={player.photo}
-          alt={player.nickname}
-          onError={() => setErr(true)}
-          className="w-6 h-6 rounded-full object-cover shrink-0"
-          referrerPolicy="no-referrer"
-        />
-      )}
-      <span className="text-text-secondary text-xs truncate">{player.nickname}</span>
-    </div>
-  );
-}
-
 export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlayerIds, onClaimed }: Props) {
   const { user } = useAuth();
   const [claiming, setClaiming] = useState<string | null>(null);
@@ -127,6 +105,12 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
             {stats.players[0]?.name} (+${(stats.players[0]?.pnl / 100).toFixed(2)})
           </div>
         </div>
+        <div className="bg-bg-card border border-border rounded-lg p-4">
+          <div className="text-text-muted text-xs uppercase tracking-wider">Biggest Loser</div>
+          <div className="font-mono text-xl font-bold text-stat-red">
+            {stats.players[stats.players.length - 1]?.name} ({(stats.players[stats.players.length - 1]?.pnl / 100) >= 0 ? '+' : ''}${(stats.players[stats.players.length - 1]?.pnl / 100).toFixed(2)})
+          </div>
+        </div>
         {(() => {
           const shark = stats.players.find(p => p.tableRole === 'shark');
           const fish = stats.players.find(p => p.tableRole === 'fish');
@@ -149,6 +133,90 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
             </>
           );
         })()}
+      </div>
+
+      {/* Player Table */}
+      <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
+              <th className="text-left p-3">Player</th>
+              <th className="text-right p-3 font-mono">Hands</th>
+              <th className="text-right p-3 font-mono">VPIP</th>
+              <th className="text-right p-3 font-mono">PFR</th>
+              <th className="text-right p-3 font-mono">Style</th>
+              <th className="text-center p-3 font-mono">Role</th>
+              <th className="text-right p-3 font-mono">P&L ($)</th>
+              {user && gameId && <th className="text-center p-3 w-20"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {stats.players.map(p => {
+              const style = getPlayerStyle(p.vpip, p.pfr);
+              return (
+                <tr
+                  key={p.id}
+                  className="border-b border-border/50 hover:bg-bg-hover cursor-pointer transition-colors"
+                  onClick={() => onSelectPlayer(p.id)}
+                >
+                  <td className="p-3 font-medium">{p.name}</td>
+                  <td className="p-3 text-right font-mono text-text-secondary">{p.handsPlayed}</td>
+                  <td className="p-3 text-right font-mono text-text-secondary">{p.vpip.toFixed(1)}%</td>
+                  <td className="p-3 text-right font-mono text-text-secondary">{p.pfr.toFixed(1)}%</td>
+                  <td className="p-3 text-right">
+                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: quadrantColors[style.label], background: `${quadrantColors[style.label]}15` }}>
+                      {style.label}
+                    </span>
+                  </td>
+                  <td className="p-3 text-center">
+                    {p.tableRole && (
+                      <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: ROLE_BADGE[p.tableRole].color, background: `${ROLE_BADGE[p.tableRole].color}15` }}>
+                        {ROLE_BADGE[p.tableRole].label}
+                      </span>
+                    )}
+                  </td>
+                  <td className={`p-3 text-right font-mono font-bold ${p.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+                    {p.pnl >= 0 ? '+' : ''}${(p.pnl / 100).toFixed(2)}
+                  </td>
+                  {user && gameId && (
+                    <td className="p-3 text-center">
+                      {claimedPlayerIds?.has(p.id) ? (
+                        <span className="inline-flex items-center gap-1 text-stat-green text-xs font-medium">
+                          <Check className="w-3 h-3" /> Me
+                        </span>
+                      ) : (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!gameId || claiming) return;
+                            setClaiming(p.id);
+                            try {
+                              await claimPlayer(gameId, user.uid, user.email ?? '', p.id);
+                              onClaimed?.(p.id);
+                            } catch (err) {
+                              console.error('Claim failed:', err);
+                            }
+                            setClaiming(null);
+                          }}
+                          disabled={!!claiming}
+                          className="inline-flex items-center gap-1 text-text-muted hover:text-accent text-xs px-2 py-1 rounded hover:bg-bg-hover transition-colors"
+                          title="Link this player to your account"
+                        >
+                          {claiming === p.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <User className="w-3 h-3" />
+                          )}
+                          This is me
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Player Style Quadrant */}
@@ -212,95 +280,6 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
           <div>Tight-Aggressive (TAG)</div>
           <div>Loose-Aggressive (LAG)</div>
         </div>
-      </div>
-
-      {/* Player Table */}
-      <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
-              <th className="text-left p-3">Player</th>
-              <th className="text-right p-3 font-mono">Hands</th>
-              <th className="text-right p-3 font-mono">VPIP</th>
-              <th className="text-right p-3 font-mono">PFR</th>
-              <th className="text-right p-3 font-mono">Style</th>
-              <th className="text-center p-3 font-mono">Role</th>
-              <th className="text-left p-3">HCL Twin</th>
-              <th className="text-right p-3 font-mono">P&L ($)</th>
-              {user && gameId && <th className="text-center p-3 w-20"></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {stats.players.map(p => {
-              const style = getPlayerStyle(p.vpip, p.pfr);
-              const hcl = findMostSimilarHCL(p.vpip, p.pfr);
-              return (
-                <tr
-                  key={p.id}
-                  className="border-b border-border/50 hover:bg-bg-hover cursor-pointer transition-colors"
-                  onClick={() => onSelectPlayer(p.id)}
-                >
-                  <td className="p-3 font-medium">{p.name}</td>
-                  <td className="p-3 text-right font-mono text-text-secondary">{p.handsPlayed}</td>
-                  <td className="p-3 text-right font-mono text-text-secondary">{p.vpip.toFixed(1)}%</td>
-                  <td className="p-3 text-right font-mono text-text-secondary">{p.pfr.toFixed(1)}%</td>
-                  <td className="p-3 text-right">
-                    <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: quadrantColors[style.label], background: `${quadrantColors[style.label]}15` }}>
-                      {style.label}
-                    </span>
-                  </td>
-                  <td className="p-3 text-center">
-                    {p.tableRole && (
-                      <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: ROLE_BADGE[p.tableRole].color, background: `${ROLE_BADGE[p.tableRole].color}15` }}>
-                        {ROLE_BADGE[p.tableRole].label}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <HCLMiniAvatar player={hcl.player} />
-                  </td>
-                  <td className={`p-3 text-right font-mono font-bold ${p.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                    {p.pnl >= 0 ? '+' : ''}${(p.pnl / 100).toFixed(2)}
-                  </td>
-                  {user && gameId && (
-                    <td className="p-3 text-center">
-                      {claimedPlayerIds?.has(p.id) ? (
-                        <span className="inline-flex items-center gap-1 text-stat-green text-xs font-medium">
-                          <Check className="w-3 h-3" /> Me
-                        </span>
-                      ) : (
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!gameId || claiming) return;
-                            setClaiming(p.id);
-                            try {
-                              await claimPlayer(gameId, user.uid, user.email ?? '', p.id);
-                              onClaimed?.(p.id);
-                            } catch (err) {
-                              console.error('Claim failed:', err);
-                            }
-                            setClaiming(null);
-                          }}
-                          disabled={!!claiming}
-                          className="inline-flex items-center gap-1 text-text-muted hover:text-accent text-xs px-2 py-1 rounded hover:bg-bg-hover transition-colors"
-                          title="Link this player to your account"
-                        >
-                          {claiming === p.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <User className="w-3 h-3" />
-                          )}
-                          This is me
-                        </button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
       </div>
     </div>
   );

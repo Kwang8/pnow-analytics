@@ -22,6 +22,30 @@ const leakLabels: Record<string, { title: string; desc: string }> = {
     title: 'Check-Call Bleed',
     desc: 'Checked flop, called turn, then lost 5+ BB — classic passive leak',
   },
+  'overlimp': {
+    title: 'Overlimps',
+    desc: 'Limped preflop instead of raising or folding — a well-known beginner leak',
+  },
+  '3bet-fold': {
+    title: '3-Bet Then Folded',
+    desc: '3-bet preflop then folded to a 4-bet — wasted chips with an aggressive move',
+  },
+  'cbet-fold': {
+    title: 'C-Bet Then Folded',
+    desc: 'C-bet the flop then folded to a raise — exploitable pattern',
+  },
+  'bb-fold-to-minraise': {
+    title: 'BB Fold to Min-Raise',
+    desc: 'Folded from BB facing a small raise (≤3x) — getting great pot odds to defend',
+  },
+  'missed-value-river': {
+    title: 'Missed Value on River',
+    desc: 'Checked river, went to showdown, and won 10+ BB — missed a value bet opportunity',
+  },
+  'overbet-bluff': {
+    title: 'Overbet Bluffs',
+    desc: 'Bet ≥ pot on turn/river and lost 10+ BB — expensive failed bluffs or overbets',
+  },
 };
 
 export default function LeaksTab({ stats }: Props) {
@@ -39,9 +63,29 @@ export default function LeaksTab({ stats }: Props) {
     );
   }
 
+  // Sum netResult (cents) per group and sort by total cost (worst first)
+  const sortedGroups = Array.from(grouped.entries())
+    .map(([type, hands]) => ({
+      type,
+      hands,
+      totalCost: hands.reduce((sum, h) => sum + h.netResult, 0), // negative = lost money
+    }))
+    .sort((a, b) => a.totalCost - b.totalCost); // most negative first
+
+  const topLeak = sortedGroups[0];
+  const topLeakInfo = leakLabels[topLeak.type] || { title: topLeak.type, desc: '' };
+
   return (
     <div className="space-y-8">
-      {Array.from(grouped.entries()).map(([type, hands]) => {
+      {/* Top Leak Banner */}
+      <div className="bg-stat-red/10 border border-stat-red/30 rounded-lg p-4">
+        <div className="text-stat-red text-xs uppercase tracking-wider font-semibold mb-1">Your Most Expensive Leak</div>
+        <div className="text-text-primary font-semibold">
+          {topLeakInfo.title} cost you ${Math.abs(topLeak.totalCost / 100).toFixed(2)} across {topLeak.hands.length} hand{topLeak.hands.length !== 1 ? 's' : ''}
+        </div>
+      </div>
+
+      {sortedGroups.map(({ type, hands, totalCost }) => {
         const info = leakLabels[type] || { title: type, desc: '' };
         return (
           <div key={type}>
@@ -50,6 +94,7 @@ export default function LeaksTab({ stats }: Props) {
                 <span className="w-2 h-2 rounded-full bg-stat-red" />
                 {info.title}
                 <span className="text-text-muted font-mono text-sm font-normal">({hands.length})</span>
+                <span className="font-mono text-sm font-normal text-stat-red">— ${Math.abs(totalCost / 100).toFixed(2)} lost</span>
               </h3>
               <p className="text-text-muted text-sm">{info.desc}</p>
             </div>

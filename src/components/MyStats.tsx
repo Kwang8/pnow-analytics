@@ -32,6 +32,7 @@ export default function MyStats() {
   const [leaks, setLeaks] = useState<LeakHand[]>([]);
   const [handsLoading, setHandsLoading] = useState(false);
   const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
+  const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions'>('Rivals');
 
   useEffect(() => {
     if (!user) return;
@@ -248,131 +249,152 @@ export default function MyStats() {
             </div>
           )}
 
-          {/* Preflop Ranges */}
-          <div className="bg-bg-card border border-border rounded-lg p-6">
-            <h3 className="text-text-primary font-semibold mb-4">Preflop Ranges</h3>
-            {handsLoading ? (
-              <div className="flex items-center justify-center py-12 text-text-muted">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                Loading hand data...
-              </div>
-            ) : (
-              <PreflopRangesTab stats={{ handResults, leaks } as any} />
-            )}
+          {/* Tab Bar */}
+          <div className="flex gap-1 bg-bg-secondary rounded-lg p-1">
+            {(['Ranges', 'Leaks', 'Rivals', 'Sessions'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'bg-bg-card text-text-primary shadow-sm'
+                    : 'text-text-muted hover:text-text-secondary'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
 
-          {/* Biggest Leaks */}
-          <div className="bg-bg-card border border-border rounded-lg p-6">
-            <h3 className="text-text-primary font-semibold mb-4">Biggest Leaks</h3>
-            {handsLoading ? (
-              <div className="flex items-center justify-center py-12 text-text-muted">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                Loading hand data...
-              </div>
-            ) : (
-              <LeaksTab stats={{ handResults, leaks } as any} />
-            )}
-          </div>
+          {/* Ranges Tab */}
+          {activeTab === 'Ranges' && (
+            <div className="bg-bg-card border border-border rounded-lg p-6">
+              {handsLoading ? (
+                <div className="flex items-center justify-center py-12 text-text-muted">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading hand data...
+                </div>
+              ) : (
+                <PreflopRangesTab stats={{ handResults, leaks } as any} />
+              )}
+            </div>
+          )}
 
-          {/* Enemies & Allies */}
-          <div className="bg-bg-card border border-border rounded-lg p-6">
-            <h3 className="text-text-primary font-semibold mb-4">Enemies & Allies</h3>
-            {handsLoading ? (
-              <div className="flex items-center justify-center py-12 text-text-muted">
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                Loading hand data...
-              </div>
-            ) : opponents.length === 0 ? (
-              <div className="text-text-muted text-sm text-center py-8">
-                Not enough data yet
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Allies — top 5 positive */}
-                <div>
-                  <div className="text-stat-green text-xs font-semibold uppercase tracking-wider mb-3">Allies (you win most against)</div>
-                  <div className="space-y-2">
-                    {opponents
-                      .filter(o => o.netResult > 0)
-                      .sort((a, b) => b.netResult - a.netResult)
-                      .slice(0, 5)
-                      .map((o, i) => (
-                        <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
-                          <div>
-                            <span className="text-text-primary text-sm">{o.name}</span>
-                            <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
+          {/* Leaks Tab */}
+          {activeTab === 'Leaks' && (
+            <div className="bg-bg-card border border-border rounded-lg p-6">
+              {handsLoading ? (
+                <div className="flex items-center justify-center py-12 text-text-muted">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading hand data...
+                </div>
+              ) : (
+                <LeaksTab stats={{ handResults, leaks } as any} />
+              )}
+            </div>
+          )}
+
+          {/* Rivals Tab */}
+          {activeTab === 'Rivals' && (
+            <div className="bg-bg-card border border-border rounded-lg p-6">
+              {handsLoading ? (
+                <div className="flex items-center justify-center py-12 text-text-muted">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading hand data...
+                </div>
+              ) : opponents.length === 0 ? (
+                <div className="text-text-muted text-sm text-center py-8">
+                  Not enough data yet
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Allies — top 5 positive */}
+                  <div>
+                    <div className="text-stat-green text-xs font-semibold uppercase tracking-wider mb-3">Allies (you win most against)</div>
+                    <div className="space-y-2">
+                      {opponents
+                        .filter(o => o.netResult > 0)
+                        .sort((a, b) => b.netResult - a.netResult)
+                        .slice(0, 5)
+                        .map((o, i) => (
+                          <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                            <div>
+                              <span className="text-text-primary text-sm">{o.name}</span>
+                              <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
+                            </div>
+                            <span className="font-mono text-sm font-bold text-stat-green">
+                              +${(o.netResult / 100).toFixed(2)}
+                            </span>
                           </div>
-                          <span className="font-mono text-sm font-bold text-stat-green">
-                            +${(o.netResult / 100).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
-                    {opponents.filter(o => o.netResult > 0).length === 0 && (
-                      <div className="text-text-muted text-xs py-2">No allies yet</div>
-                    )}
+                        ))}
+                      {opponents.filter(o => o.netResult > 0).length === 0 && (
+                        <div className="text-text-muted text-xs py-2">No allies yet</div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Enemies — top 5 negative */}
+                  <div>
+                    <div className="text-stat-red text-xs font-semibold uppercase tracking-wider mb-3">Enemies (you lose most against)</div>
+                    <div className="space-y-2">
+                      {opponents
+                        .filter(o => o.netResult < 0)
+                        .sort((a, b) => a.netResult - b.netResult)
+                        .slice(0, 5)
+                        .map((o, i) => (
+                          <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                            <div>
+                              <span className="text-text-primary text-sm">{o.name}</span>
+                              <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
+                            </div>
+                            <span className="font-mono text-sm font-bold text-stat-red">
+                              -${(Math.abs(o.netResult) / 100).toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                      {opponents.filter(o => o.netResult < 0).length === 0 && (
+                        <div className="text-text-muted text-xs py-2">No enemies yet</div>
+                      )}
+                    </div>
                   </div>
                 </div>
-                {/* Enemies — top 5 negative */}
-                <div>
-                  <div className="text-stat-red text-xs font-semibold uppercase tracking-wider mb-3">Enemies (you lose most against)</div>
-                  <div className="space-y-2">
-                    {opponents
-                      .filter(o => o.netResult < 0)
-                      .sort((a, b) => a.netResult - b.netResult)
-                      .slice(0, 5)
-                      .map((o, i) => (
-                        <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
-                          <div>
-                            <span className="text-text-primary text-sm">{o.name}</span>
-                            <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
-                          </div>
-                          <span className="font-mono text-sm font-bold text-stat-red">
-                            -${(Math.abs(o.netResult) / 100).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
-                    {opponents.filter(o => o.netResult < 0).length === 0 && (
-                      <div className="text-text-muted text-xs py-2">No enemies yet</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
-          {/* Session History */}
-          <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
-            <h3 className="text-text-primary font-semibold p-4 pb-2">Session History</h3>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
-                  <th className="text-left p-3">Date</th>
-                  <th className="text-right p-3 font-mono">Hands</th>
-                  <th className="text-right p-3 font-mono">VPIP</th>
-                  <th className="text-right p-3 font-mono">PFR</th>
-                  <th className="text-right p-3 font-mono">P&L ($)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((d, i) => {
-                  const date = d.gameDate
-                    ? new Date(d.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                    : `Session ${i + 1}`;
-                  return (
-                    <tr key={`${d.gameId}-${i}`} className="border-b border-border/50">
-                      <td className="p-3 text-text-secondary">{date}</td>
-                      <td className="p-3 text-right font-mono text-text-secondary">{d.handsPlayed}</td>
-                      <td className="p-3 text-right font-mono text-text-secondary">{d.vpip.toFixed(1)}%</td>
-                      <td className="p-3 text-right font-mono text-text-secondary">{d.pfr.toFixed(1)}%</td>
-                      <td className={`p-3 text-right font-mono font-bold ${d.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                        {d.pnl >= 0 ? '+' : ''}${(d.pnl / 100).toFixed(2)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {/* Sessions Tab */}
+          {activeTab === 'Sessions' && (
+            <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
+                    <th className="text-left p-3">Date</th>
+                    <th className="text-right p-3 font-mono">Hands</th>
+                    <th className="text-right p-3 font-mono">VPIP</th>
+                    <th className="text-right p-3 font-mono">PFR</th>
+                    <th className="text-right p-3 font-mono">P&L ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((d, i) => {
+                    const date = d.gameDate
+                      ? new Date(d.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : `Session ${i + 1}`;
+                    return (
+                      <tr key={`${d.gameId}-${i}`} className="border-b border-border/50">
+                        <td className="p-3 text-text-secondary">{date}</td>
+                        <td className="p-3 text-right font-mono text-text-secondary">{d.handsPlayed}</td>
+                        <td className="p-3 text-right font-mono text-text-secondary">{d.vpip.toFixed(1)}%</td>
+                        <td className="p-3 text-right font-mono text-text-secondary">{d.pfr.toFixed(1)}%</td>
+                        <td className={`p-3 text-right font-mono font-bold ${d.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+                          {d.pnl >= 0 ? '+' : ''}${(d.pnl / 100).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

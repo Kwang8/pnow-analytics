@@ -412,6 +412,40 @@ export async function getAllPlayerStats(currentUid: string): Promise<Leaderboard
   return entries;
 }
 
+// ─── Batch-load all gamePlayers for given games ─────────────────────────
+
+export async function getAllGamePlayers(gameIds: string[]): Promise<GamePlayerDoc[]> {
+  if (gameIds.length === 0) return [];
+  const allDocs: GamePlayerDoc[] = [];
+  for (let i = 0; i < gameIds.length; i += 30) {
+    const batch = gameIds.slice(i, i + 30);
+    const gpQ = query(collection(db, 'gamePlayers'), where('gameId', 'in', batch));
+    const gpSnap = await getDocs(gpQ);
+    allDocs.push(...gpSnap.docs.map(d => d.data() as GamePlayerDoc));
+  }
+  return allDocs;
+}
+
+// ─── Batch-load user profiles by uid ────────────────────────────────────
+
+export async function getUserProfiles(uids: string[]): Promise<Map<string, { displayName: string; username: string }>> {
+  const map = new Map<string, { displayName: string; username: string }>();
+  if (uids.length === 0) return map;
+  for (let i = 0; i < uids.length; i += 30) {
+    const batch = uids.slice(i, i + 30);
+    const uq = query(collection(db, 'users'), where('__name__', 'in', batch));
+    const uSnap = await getDocs(uq);
+    for (const ud of uSnap.docs) {
+      const data = ud.data() as { displayName?: string; username?: string };
+      map.set(ud.id, {
+        displayName: data.displayName ?? 'Unknown',
+        username: data.username ?? '',
+      });
+    }
+  }
+  return map;
+}
+
 // ─── Check if game already saved ────────────────────────────────────────
 
 export async function findExistingGame(uid: string, pokerNowGameId: string): Promise<string | null> {

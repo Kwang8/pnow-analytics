@@ -821,6 +821,51 @@ export function analyzePlayer(data: PokerNowExport, playerId: string): PlayerSta
   };
 }
 
+// ─── Opponent Stats ──────────────────────────────────────────────────────
+
+export interface OpponentStat {
+  id: string;          // poker now player ID
+  name: string;        // display name (poker now name per game)
+  handsPlayed: number; // hands where both hero & opponent put money in
+  netResult: number;   // hero's total P&L in those hands (cents)
+}
+
+const MONEY_IN_TYPES: readonly number[] = [EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE];
+
+export function computeOpponentStats(data: PokerNowExport, playerId: string): OpponentStat[] {
+  const acc = new Map<string, { name: string; handsPlayed: number; netResult: number }>();
+
+  for (const hand of data.hands) {
+    const hero = hand.players.find(p => p.id === playerId);
+    if (!hero) continue;
+
+    const heroNet = getNetResult(hand, hero.seat);
+
+    // Find opponents who put money in
+    const oppsWithMoney = new Set<string>();
+    for (const e of hand.events) {
+      const p = e.payload;
+      if ('seat' in p && MONEY_IN_TYPES.includes(p.type)) {
+        const seat = (p as { seat: number }).seat;
+        if (seat !== hero.seat) {
+          const opp = hand.players.find(pl => pl.seat === seat);
+          if (opp) oppsWithMoney.add(opp.id);
+        }
+      }
+    }
+
+    for (const oppId of oppsWithMoney) {
+      const opp = hand.players.find(pl => pl.id === oppId)!;
+      const prev = acc.get(oppId) ?? { name: opp.name, handsPlayed: 0, netResult: 0 };
+      prev.handsPlayed++;
+      prev.netResult += heroNet;
+      acc.set(oppId, prev);
+    }
+  }
+
+  return Array.from(acc.entries()).map(([id, s]) => ({ id, ...s }));
+}
+
 // ─── Overall Session Stats ──────────────────────────────────────────────
 
 export function analyzeOverall(data: PokerNowExport): OverallStats {

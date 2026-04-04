@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { getMyGamePlayerDocs, getGameRawData, type GamePlayerDoc } from '../lib/gameStore';
-import { analyzePlayer } from '../lib/analysis';
+import { getMyGamePlayerDocs, getGameRawData, getAllGamePlayers, getUserProfiles, type GamePlayerDoc } from '../lib/gameStore';
+import { analyzePlayer, computeOpponentStats, type OpponentStat } from '../lib/analysis';
 import type { HandResult, LeakHand } from '../lib/types';
 import PreflopRangesTab from './PreflopRangesTab';
 import LeaksTab from './LeaksTab';
@@ -31,6 +31,7 @@ export default function MyStats() {
   const [handResults, setHandResults] = useState<HandResult[]>([]);
   const [leaks, setLeaks] = useState<LeakHand[]>([]);
   const [handsLoading, setHandsLoading] = useState(false);
+  const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -41,29 +42,86 @@ export default function MyStats() {
     });
   }, [user]);
 
-  // Background load hand-level data for preflop chart & leaks
+  // Background load hand-level data for preflop chart, leaks & opponent stats
   useEffect(() => {
     if (docs.length === 0) return;
     setHandsLoading(true);
-    Promise.all(
-      docs.map(async (doc) => {
-        const raw = await getGameRawData(doc.gameId);
-        if (!raw) return null;
-        return analyzePlayer(raw, doc.pokerNowId);
-      })
-    ).then((results) => {
+
+    const gameIds = docs.map(d => d.gameId);
+
+    // Load raw data + gamePlayers claims in parallel
+    Promise.all([
+      Promise.all(
+        docs.map(async (doc) => {
+          const raw = await getGameRawData(doc.gameId);
+          if (!raw) return null;
+          return { raw, pokerNowId: doc.pokerNowId, gameId: doc.gameId };
+        })
+      ),
+      getAllGamePlayers(gameIds),
+    ]).then(async ([rawResults, allGpDocs]) => {
+      // Analyze hands
       const allHands: HandResult[] = [];
       const allLeaks: LeakHand[] = [];
-      for (const r of results) {
-        if (!r) continue;
-        allHands.push(...r.handResults);
-        allLeaks.push(...r.leaks);
+      const perGameOpponents: { gameId: string; stats: OpponentStat[] }[] = [];
+
+      for (const entry of rawResults) {
+        if (!entry) continue;
+        const analysis = analyzePlayer(entry.raw, entry.pokerNowId);
+        allHands.push(...analysis.handResults);
+        allLeaks.push(...analysis.leaks);
+        perGameOpponents.push({ gameId: entry.gameId, stats: computeOpponentStats(entry.raw, entry.pokerNowId) });
       }
+
       setHandResults(allHands);
       setLeaks(allLeaks);
+
+      // Build claim map: (gameId, pokerNowId) → uid
+      const claimMap = new Map<string, string>();
+      for (const gp of allGpDocs) {
+        if (gp.uid) claimMap.set(`${gp.gameId}_${gp.pokerNowId}`, gp.uid);
+      }
+
+      // Collect unique uids of opponents (exclude self)
+      const oppUids = new Set<string>();
+      for (const { gameId, stats } of perGameOpponents) {
+        for (const opp of stats) {
+          const uid = claimMap.get(`${gameId}_${opp.id}`);
+          if (uid && uid !== user!.uid) oppUids.add(uid);
+        }
+      }
+
+      // Batch-load user profiles for display names
+      const profiles = await getUserProfiles([...oppUids]);
+
+      // Merge opponent stats across sessions, keying by uid if claimed, else by poker now name
+      const merged = new Map<string, { name: string; handsPlayed: number; netResult: number }>();
+      for (const { gameId, stats } of perGameOpponents) {
+        for (const opp of stats) {
+          const uid = claimMap.get(`${gameId}_${opp.id}`);
+          let key: string;
+          let displayName: string;
+          if (uid && uid !== user!.uid) {
+            key = `uid:${uid}`;
+            const profile = profiles.get(uid);
+            displayName = profile?.username ? `@${profile.username}` : profile?.displayName ?? opp.name;
+          } else if (uid === user!.uid) {
+            continue; // skip self
+          } else {
+            key = `name:${opp.name}`;
+            displayName = opp.name;
+          }
+          const prev = merged.get(key) ?? { name: displayName, handsPlayed: 0, netResult: 0 };
+          prev.handsPlayed += opp.handsPlayed;
+          prev.netResult += opp.netResult;
+          merged.set(key, prev);
+        }
+      }
+
+      setOpponents(Array.from(merged.values()));
       setHandsLoading(false);
     });
-  }, [docs]);
+  }, [docs, user]);
 
   const sorted = useMemo(() =>
     [...docs].sort((a, b) => (a.gameDate ?? '').localeCompare(b.gameDate ?? '')),
@@ -213,6 +271,72 @@ export default function MyStats() {
               </div>
             ) : (
               <LeaksTab stats={{ handResults, leaks } as any} />
+            )}
+          </div>
+
+          {/* Enemies & Allies */}
+          <div className="bg-bg-card border border-border rounded-lg p-6">
+            <h3 className="text-text-primary font-semibold mb-4">Enemies & Allies</h3>
+            {handsLoading ? (
+              <div className="flex items-center justify-center py-12 text-text-muted">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Loading hand data...
+              </div>
+            ) : opponents.length === 0 ? (
+              <div className="text-text-muted text-sm text-center py-8">
+                Not enough data yet
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Allies — top 5 positive */}
+                <div>
+                  <div className="text-stat-green text-xs font-semibold uppercase tracking-wider mb-3">Allies (you win most against)</div>
+                  <div className="space-y-2">
+                    {opponents
+                      .filter(o => o.netResult > 0)
+                      .sort((a, b) => b.netResult - a.netResult)
+                      .slice(0, 5)
+                      .map((o, i) => (
+                        <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                          <div>
+                            <span className="text-text-primary text-sm">{o.name}</span>
+                            <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
+                          </div>
+                          <span className="font-mono text-sm font-bold text-stat-green">
+                            +${(o.netResult / 100).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    {opponents.filter(o => o.netResult > 0).length === 0 && (
+                      <div className="text-text-muted text-xs py-2">No allies yet</div>
+                    )}
+                  </div>
+                </div>
+                {/* Enemies — top 5 negative */}
+                <div>
+                  <div className="text-stat-red text-xs font-semibold uppercase tracking-wider mb-3">Enemies (you lose most against)</div>
+                  <div className="space-y-2">
+                    {opponents
+                      .filter(o => o.netResult < 0)
+                      .sort((a, b) => a.netResult - b.netResult)
+                      .slice(0, 5)
+                      .map((o, i) => (
+                        <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/30 last:border-0">
+                          <div>
+                            <span className="text-text-primary text-sm">{o.name}</span>
+                            <span className="text-text-muted text-xs ml-2">{o.handsPlayed} hands</span>
+                          </div>
+                          <span className="font-mono text-sm font-bold text-stat-red">
+                            -${(Math.abs(o.netResult) / 100).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    {opponents.filter(o => o.netResult < 0).length === 0 && (
+                      <div className="text-text-muted text-xs py-2">No enemies yet</div>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 

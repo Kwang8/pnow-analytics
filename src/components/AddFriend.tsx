@@ -103,8 +103,7 @@ export default function AddFriend({ onDone }: Props) {
                     </div>
                   )}
                   <div>
-                    <div className="text-text-primary text-sm font-medium">{foundUser.displayName}</div>
-                    <div className="text-text-muted text-xs">@{foundUser.username}</div>
+                    <div className="text-text-primary text-sm font-medium">@{foundUser.username}</div>
                   </div>
                 </div>
 

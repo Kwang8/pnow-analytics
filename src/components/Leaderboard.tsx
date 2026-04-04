@@ -83,12 +83,9 @@ export default function Leaderboard() {
                         )}
                         <div className="min-w-0">
                           <div className={`font-medium truncate ${isMe ? 'text-accent' : 'text-text-primary'}`}>
-                            {entry.displayName}
+                            @{entry.username || 'unknown'}
                             {isMe && <span className="text-xs ml-1 text-accent/70">(you)</span>}
                           </div>
-                          {entry.username && (
-                            <div className="text-text-muted text-xs truncate">@{entry.username}</div>
-                          )}
                         </div>
                       </div>
                     </td>

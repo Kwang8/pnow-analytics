@@ -5,6 +5,7 @@ import LeaksTab from './LeaksTab';
 import KeyHandsTab from './KeyHandsTab';
 import PositionTab from './PositionTab';
 import HCLComparison from './HCLComparison';
+import PreflopRangesTab from './PreflopRangesTab';
 
 interface Props {
   stats: PlayerStats;
@@ -34,8 +35,8 @@ function getHealth(stat: string, value: number): StatHealth {
   return 'good';
 }
 
-const allTabs = ['Stats', 'Leaks', 'Key Hands', 'Position'] as const;
-const sharedTabs = ['Stats', 'Position'] as const;
+const allTabs = ['Stats', 'Leaks', 'Key Hands', 'Position', 'Preflop Ranges'] as const;
+const sharedTabs = ['Stats', 'Position', 'Preflop Ranges'] as const;
 
 export default function Dashboard({ stats, onBack, isSharedView }: Props) {
   const tabs = isSharedView ? sharedTabs : allTabs;
@@ -178,6 +179,7 @@ export default function Dashboard({ stats, onBack, isSharedView }: Props) {
       {activeTab === 'Leaks' && <LeaksTab stats={stats} />}
       {activeTab === 'Key Hands' && <KeyHandsTab stats={stats} />}
       {activeTab === 'Position' && <PositionTab stats={stats} />}
+      {activeTab === 'Preflop Ranges' && <PreflopRangesTab stats={stats} />}
     </div>
   );
 }

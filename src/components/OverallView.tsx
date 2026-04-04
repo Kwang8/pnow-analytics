@@ -192,11 +192,24 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
             <ReferenceLine y={15} stroke="#22c55e" strokeWidth={2} strokeOpacity={0.6} />
             <Tooltip content={<ScatterTooltip />} />
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <Scatter data={scatterData} cursor="pointer" onClick={(d: any) => onSelectPlayer(d.meta.id)}>
-              {scatterData.map((entry, i) => (
-                <Cell key={i} fill={entry.meta.fill} fillOpacity={0.85} stroke={entry.meta.fill} strokeWidth={1} />
-              ))}
-            </Scatter>
+            <Scatter
+              data={scatterData}
+              cursor="pointer"
+              onClick={(d: any) => onSelectPlayer(d.meta.id)}
+              shape={(props: any) => {
+                const { cx, cy, payload } = props;
+                const fill = payload.meta.fill;
+                const r = Math.max(6, Math.min(14, 4 + payload.hands * 0.04));
+                return (
+                  <g>
+                    <circle cx={cx} cy={cy} r={r} fill={fill} fillOpacity={0.85} stroke={fill} strokeWidth={1} />
+                    <text x={cx} y={cy + r + 12} textAnchor="middle" fill="#94a3b8" fontSize={11} fontFamily="Inter, sans-serif">
+                      {payload.meta.name}
+                    </text>
+                  </g>
+                );
+              }}
+            />
           </ScatterChart>
         </ResponsiveContainer>
         <div className="flex justify-center gap-6 mt-3 text-xs">

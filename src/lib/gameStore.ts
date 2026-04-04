@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import { db } from './firebase';
+import { analyzeOverall } from './analysis';
 import type { PokerNowExport, OverallStats } from './types';
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -143,6 +144,61 @@ export async function getGameRawData(gameId: string): Promise<PokerNowExport | n
   }
 }
 
+// ─── Refresh Game (re-derive stored summaries from raw data) ────────────
+
+export async function refreshGame(gameId: string): Promise<void> {
+  const snap = await getDoc(doc(db, 'games', gameId));
+  if (!snap.exists()) return;
+  const rawData = snap.data().rawData as string;
+  if (!rawData) return;
+
+  let data: PokerNowExport;
+  try {
+    data = JSON.parse(decompressFromUTF16(rawData)!) as PokerNowExport;
+  } catch {
+    return;
+  }
+
+  const overall = analyzeOverall(data);
+  const gameDate = data.hands.length > 0
+    ? new Date(data.hands[0].startedAt).toISOString()
+    : data.generatedAt;
+
+  const playerSummaries: PlayerSummary[] = overall.players.map(p => ({
+    pokerNowId: p.id,
+    name: p.name,
+    pnl: p.pnl,
+    pnlBB: p.pnlBB,
+    vpip: p.vpip,
+    pfr: p.pfr,
+    handsPlayed: p.handsPlayed,
+  }));
+
+  await updateDoc(doc(db, 'games', gameId), {
+    playerSummaries,
+    gameDate,
+    totalHands: overall.totalHands,
+    bigBlind: overall.bigBlind,
+  });
+
+  // Batch-update gamePlayers docs (preserve existing uid)
+  const batch = writeBatch(db);
+  for (const p of overall.players) {
+    const gpRef = doc(db, 'gamePlayers', `${gameId}_${p.id}`);
+    batch.update(gpRef, {
+      playerName: p.name,
+      pnl: p.pnl,
+      pnlBB: p.pnlBB,
+      vpip: p.vpip,
+      pfr: p.pfr,
+      handsPlayed: p.handsPlayed,
+      bigBlind: overall.bigBlind,
+      gameDate,
+    });
+  }
+  await batch.commit();
+}
+
 // ─── Delete Game ────────────────────────────────────────────────────────
 
 export async function deleteGame(gameId: string, uid: string): Promise<boolean> {
@@ -252,25 +308,38 @@ export async function claimPlayer(
   email: string,
   pokerNowPlayerId: string,
 ): Promise<void> {
+  // Guard: check if already claimed by someone else
+  const gpRef = doc(db, 'gamePlayers', `${gameId}_${pokerNowPlayerId}`);
+  const gpSnap = await getDoc(gpRef);
+  if (gpSnap.exists()) {
+    const existing = gpSnap.data().uid as string | null;
+    if (existing && existing !== uid) {
+      throw new Error('This player slot is already claimed by another user.');
+    }
+  }
+
   const gameRef = doc(db, 'games', gameId);
   await updateDoc(gameRef, {
     members: arrayUnion(uid),
     memberEmails: arrayUnion(email),
   });
-  const gpRef = doc(db, 'gamePlayers', `${gameId}_${pokerNowPlayerId}`);
   await updateDoc(gpRef, { uid });
 }
 
-// ─── Get claimed player IDs for a game ──────────────────────────────────
+// ─── Get all claims for a game ──────────────────────────────────────────
 
-export async function getClaimedPlayers(gameId: string, uid: string): Promise<string[]> {
+export async function getGameClaims(gameId: string): Promise<Map<string, string | null>> {
   const q = query(
     collection(db, 'gamePlayers'),
     where('gameId', '==', gameId),
-    where('uid', '==', uid),
   );
   const snap = await getDocs(q);
-  return snap.docs.map(d => (d.data() as GamePlayerDoc).pokerNowId);
+  const map = new Map<string, string | null>();
+  for (const d of snap.docs) {
+    const data = d.data() as GamePlayerDoc;
+    map.set(data.pokerNowId, data.uid);
+  }
+  return map;
 }
 
 // ─── Leaderboard: All Player Stats ──────────────────────────────────────
@@ -348,7 +417,7 @@ export async function getAllPlayerStats(currentUid: string): Promise<Leaderboard
 export async function findExistingGame(uid: string, pokerNowGameId: string): Promise<string | null> {
   const q = query(
     collection(db, 'games'),
-    where('uploadedBy', '==', uid),
+    where('members', 'array-contains', uid),
     where('pokerNowGameId', '==', pokerNowGameId),
   );
   const snap = await getDocs(q);

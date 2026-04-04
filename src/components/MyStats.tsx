@@ -1,6 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { getMyGamePlayerDocs, type GamePlayerDoc } from '../lib/gameStore';
+import { getMyGamePlayerDocs, getGameRawData, type GamePlayerDoc } from '../lib/gameStore';
+import { analyzePlayer } from '../lib/analysis';
+import type { HandResult, LeakHand } from '../lib/types';
+import PreflopRangesTab from './PreflopRangesTab';
+import LeaksTab from './LeaksTab';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine,
 } from 'recharts';
@@ -24,6 +28,9 @@ export default function MyStats() {
   const { user } = useAuth();
   const [docs, setDocs] = useState<GamePlayerDoc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [handResults, setHandResults] = useState<HandResult[]>([]);
+  const [leaks, setLeaks] = useState<LeakHand[]>([]);
+  const [handsLoading, setHandsLoading] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -33,6 +40,30 @@ export default function MyStats() {
       setLoading(false);
     });
   }, [user]);
+
+  // Background load hand-level data for preflop chart & leaks
+  useEffect(() => {
+    if (docs.length === 0) return;
+    setHandsLoading(true);
+    Promise.all(
+      docs.map(async (doc) => {
+        const raw = await getGameRawData(doc.gameId);
+        if (!raw) return null;
+        return analyzePlayer(raw, doc.pokerNowId);
+      })
+    ).then((results) => {
+      const allHands: HandResult[] = [];
+      const allLeaks: LeakHand[] = [];
+      for (const r of results) {
+        if (!r) continue;
+        allHands.push(...r.handResults);
+        allLeaks.push(...r.leaks);
+      }
+      setHandResults(allHands);
+      setLeaks(allLeaks);
+      setHandsLoading(false);
+    });
+  }, [docs]);
 
   const sorted = useMemo(() =>
     [...docs].sort((a, b) => (a.gameDate ?? '').localeCompare(b.gameDate ?? '')),
@@ -158,6 +189,32 @@ export default function MyStats() {
               </ResponsiveContainer>
             </div>
           )}
+
+          {/* Preflop Ranges */}
+          <div className="bg-bg-card border border-border rounded-lg p-6">
+            <h3 className="text-text-primary font-semibold mb-4">Preflop Ranges</h3>
+            {handsLoading ? (
+              <div className="flex items-center justify-center py-12 text-text-muted">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Loading hand data...
+              </div>
+            ) : (
+              <PreflopRangesTab stats={{ handResults, leaks } as any} />
+            )}
+          </div>
+
+          {/* Biggest Leaks */}
+          <div className="bg-bg-card border border-border rounded-lg p-6">
+            <h3 className="text-text-primary font-semibold mb-4">Biggest Leaks</h3>
+            {handsLoading ? (
+              <div className="flex items-center justify-center py-12 text-text-muted">
+                <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                Loading hand data...
+              </div>
+            ) : (
+              <LeaksTab stats={{ handResults, leaks } as any} />
+            )}
+          </div>
 
           {/* Session History */}
           <div className="bg-bg-card border border-border rounded-lg overflow-hidden">

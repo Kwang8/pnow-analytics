@@ -13,7 +13,7 @@ interface Props {
   stats: OverallStats;
   onSelectPlayer: (id: string) => void;
   gameId?: string | null;
-  claimedPlayerIds?: Set<string>;
+  claimMap?: Map<string, string | null>;
   onClaimed?: (pokerNowPlayerId: string) => void;
 }
 
@@ -58,7 +58,7 @@ function ScatterTooltip({ active, payload }: any) {
   );
 }
 
-export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlayerIds, onClaimed }: Props) {
+export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, onClaimed }: Props) {
   const { user } = useAuth();
   const [claiming, setClaiming] = useState<string | null>(null);
   const scatterData = useMemo(() =>
@@ -178,40 +178,47 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
                   <td className={`p-3 text-right font-mono font-bold ${p.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
                     {p.pnl >= 0 ? '+' : ''}${(p.pnl / 100).toFixed(2)}
                   </td>
-                  {user && gameId && (
-                    <td className="p-3 text-center">
-                      {claimedPlayerIds?.has(p.id) ? (
-                        <span className="inline-flex items-center gap-1 text-stat-green text-xs font-medium">
-                          <Check className="w-3 h-3" /> Me
-                        </span>
-                      ) : (
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!gameId || claiming) return;
-                            setClaiming(p.id);
-                            try {
-                              await claimPlayer(gameId, user.uid, user.email ?? '', p.id);
-                              onClaimed?.(p.id);
-                            } catch (err) {
-                              console.error('Claim failed:', err);
-                            }
-                            setClaiming(null);
-                          }}
-                          disabled={!!claiming}
-                          className="inline-flex items-center gap-1 text-text-muted hover:text-accent text-xs px-2 py-1 rounded hover:bg-bg-hover transition-colors"
-                          title="Link this player to your account"
-                        >
-                          {claiming === p.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <User className="w-3 h-3" />
-                          )}
-                          This is me
-                        </button>
-                      )}
-                    </td>
-                  )}
+                  {user && gameId && (() => {
+                    const claimUid = claimMap?.get(p.id);
+                    return (
+                      <td className="p-3 text-center">
+                        {claimUid === user.uid ? (
+                          <span className="inline-flex items-center gap-1 text-stat-green text-xs font-medium">
+                            <Check className="w-3 h-3" /> Me
+                          </span>
+                        ) : claimUid ? (
+                          <span className="inline-flex items-center gap-1 text-text-muted text-xs font-medium opacity-50">
+                            Claimed
+                          </span>
+                        ) : (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (!gameId || claiming) return;
+                              setClaiming(p.id);
+                              try {
+                                await claimPlayer(gameId, user.uid, user.email ?? '', p.id);
+                                onClaimed?.(p.id);
+                              } catch (err) {
+                                console.error('Claim failed:', err);
+                              }
+                              setClaiming(null);
+                            }}
+                            disabled={!!claiming}
+                            className="inline-flex items-center gap-1 text-text-muted hover:text-accent text-xs px-2 py-1 rounded hover:bg-bg-hover transition-colors"
+                            title="Link this player to your account"
+                          >
+                            {claiming === p.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <User className="w-3 h-3" />
+                            )}
+                            This is me
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })()}
                 </tr>
               );
             })}

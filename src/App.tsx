@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { PokerNowExport, PlayerStats, OverallStats } from './lib/types';
 import { analyzePlayer, analyzeOverall } from './lib/analysis';
 import { decodeShareData, getShareDataFromUrl } from './lib/share';
-import { saveGame, getGameRawData, findExistingGame, getClaimedPlayers } from './lib/gameStore';
+import { saveGame, getGameRawData, findExistingGame, getGameClaims, refreshGame } from './lib/gameStore';
 import { useAuth } from './lib/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import UsernameSetup from './components/UsernameSetup';
@@ -34,8 +34,8 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  // Map of gameId -> Set of claimed pokerNow player IDs
-  const [claimedMap, setClaimedMap] = useState<Map<string, Set<string>>>(new Map());
+  // Map of gameId -> (pokerNowId -> uid | null)
+  const [claimedMap, setClaimedMap] = useState<Map<string, Map<string, string | null>>>(new Map());
 
   // Mobile sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -141,14 +141,12 @@ export default function App() {
 
   const loadClaims = useCallback(async (gameId: string) => {
     if (!user) return;
-    const ids = await getClaimedPlayers(gameId, user.uid);
-    if (ids.length > 0) {
-      setClaimedMap(prev => {
-        const next = new Map(prev);
-        next.set(gameId, new Set(ids));
-        return next;
-      });
-    }
+    const claims = await getGameClaims(gameId);
+    setClaimedMap(prev => {
+      const next = new Map(prev);
+      next.set(gameId, claims);
+      return next;
+    });
   }, [user]);
 
   const handleOpenGame = useCallback(async (gameId: string) => {
@@ -164,6 +162,13 @@ export default function App() {
       setContentView('overall');
       setSidebarOpen(false);
       loadClaims(gameId);
+
+      // Background refresh: re-derive stored summaries from raw data
+      refreshGame(gameId).then(() => {
+        setRefreshKey(k => k + 1);
+      }).catch(err => {
+        console.error('Failed to refresh game:', err);
+      });
     }
   }, [loadClaims]);
 
@@ -387,14 +392,14 @@ export default function App() {
                   stats={overallStats}
                   onSelectPlayer={handleSelectPlayer}
                   gameId={currentGameId}
-                  claimedPlayerIds={currentGameId ? claimedMap.get(currentGameId) : undefined}
+                  claimMap={currentGameId ? claimedMap.get(currentGameId) : undefined}
                   onClaimed={(id) => {
-                    if (!currentGameId) return;
+                    if (!currentGameId || !user) return;
                     setClaimedMap(prev => {
                       const next = new Map(prev);
-                      const set = new Set(next.get(currentGameId) ?? []);
-                      set.add(id);
-                      next.set(currentGameId, set);
+                      const inner = new Map(next.get(currentGameId) ?? []);
+                      inner.set(id, user.uid);
+                      next.set(currentGameId, inner);
                       return next;
                     });
                   }}

@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import type { OverallStats } from '../lib/types';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
-  ScatterChart, Scatter, ReferenceLine, ZAxis, Label,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell,
+  ScatterChart, Scatter, ReferenceLine, ZAxis, Label, Tooltip,
 } from 'recharts';
 
 interface Props {
@@ -26,6 +26,38 @@ const quadrantColors: Record<string, string> = {
   'Nit': '#3b82f6',
   'Calling Station': '#ef4444',
 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function PnlTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const value = payload[0].value as number;
+  return (
+    <div style={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, padding: '8px 12px', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
+      <div style={{ color: '#e2e8f0', marginBottom: 4 }}>{label}</div>
+      <div style={{ color: value >= 0 ? '#22c55e' : '#ef4444' }}>
+        P&L: {value > 0 ? '+' : ''}{value.toFixed(1)} BB
+      </div>
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ScatterTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div style={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, padding: '8px 12px', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
+      <div style={{ color: '#e2e8f0', fontWeight: 600, marginBottom: 4 }}>
+        {d.name} — {d.style}
+      </div>
+      <div style={{ color: '#94a3b8' }}>VPIP: {d.vpip.toFixed(1)}%</div>
+      <div style={{ color: '#94a3b8' }}>PFR: {d.pfr.toFixed(1)}%</div>
+      <div style={{ color: d.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+        P&L: {d.pnl > 0 ? '+' : ''}{d.pnl.toFixed(1)} BB
+      </div>
+    </div>
+  );
+}
 
 export default function OverallView({ stats, onSelectPlayer }: Props) {
   const pnlData = useMemo(() =>
@@ -95,12 +127,7 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
               tick={{ fill: '#e2e8f0', fontSize: 13 }}
               width={100}
             />
-            <Tooltip
-              contentStyle={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, fontFamily: 'JetBrains Mono' }}
-              labelStyle={{ color: '#e2e8f0' }}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              formatter={(value: any) => [`${value > 0 ? '+' : ''}${Number(value).toFixed(1)} BB`, 'P&L']}
-            />
+            <Tooltip content={<PnlTooltip />} />
             <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
               {pnlData.map((entry, i) => (
                 <Cell key={i} fill={entry.fill} />
@@ -137,39 +164,13 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
             <ZAxis type="number" dataKey="hands" range={[80, 300]} />
             <ReferenceLine x={25} stroke="#22c55e" strokeWidth={2} strokeOpacity={0.6} />
             <ReferenceLine y={15} stroke="#22c55e" strokeWidth={2} strokeOpacity={0.6} />
-            <Tooltip
-              contentStyle={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, fontFamily: 'JetBrains Mono', fontSize: 12 }}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              formatter={(_v: any, name: any, props: any) => {
-                if (name === 'pfr') return [`${props.payload.pfr.toFixed(1)}%`, 'PFR'];
-                return [`${props.payload.vpip.toFixed(1)}%`, 'VPIP'];
-              }}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              labelFormatter={(_l: any, payload: any) => {
-                const d = payload?.[0]?.payload;
-                return d ? `${d.name} — ${d.style} (${d.pnl > 0 ? '+' : ''}${d.pnl.toFixed(1)} BB)` : '';
-              }}
-            />
+            <Tooltip content={<ScatterTooltip />} />
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             <Scatter data={scatterData} cursor="pointer" onClick={(d: any) => onSelectPlayer(d.id)}>
               {scatterData.map((entry, i) => (
                 <Cell key={i} fill={entry.fill} fillOpacity={0.85} stroke={entry.fill} strokeWidth={1} />
               ))}
             </Scatter>
-            {/* Quadrant labels */}
-            {(() => {
-              const labels = [
-                { x: 12, y: 47, text: 'Nit', sub: 'Tight-Passive', color: '#3b82f6' },
-                { x: 12, y: 43, text: '', sub: '', color: 'transparent' },
-                { x: 50, y: 47, text: 'Calling Station', sub: 'Loose-Passive', color: '#ef4444' },
-                { x: 50, y: 43, text: '', sub: '', color: 'transparent' },
-              ];
-              return labels.filter(l => l.text).map((_l, i) => (
-                <text key={i} x={0} y={0} style={{ pointerEvents: 'none' }}>
-                  {/* These won't render in ScatterChart but the quadrant lines + tooltip serve the purpose */}
-                </text>
-              ));
-            })()}
           </ScatterChart>
         </ResponsiveContainer>
         <div className="flex justify-center gap-6 mt-3 text-xs">
@@ -178,7 +179,6 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#3b82f6]" /> Nit</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#ef4444]" /> Calling Station</span>
         </div>
-        {/* Quadrant text overlays */}
         <div className="grid grid-cols-2 gap-0 mt-2 text-center text-xs text-text-muted opacity-60">
           <div>Tight-Passive (Nit)</div>
           <div>Loose-Passive (Calling Station)</div>

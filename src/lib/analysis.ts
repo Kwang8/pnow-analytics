@@ -396,6 +396,19 @@ function getStreetActions(hand: Hand, playerSeat: number, targetStreet: Street):
   return result;
 }
 
+// ─── Running pot tracker (for overbet detection) ────────────────────────
+
+function getRunningPotAtAction(events: { payload: EventPayload }[], actionIndex: number): number {
+  let pot = 0;
+  for (let i = 0; i < actionIndex; i++) {
+    const p = events[i].payload;
+    if ('value' in p && ([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
+      pot += (p as { value: number }).value;
+    }
+  }
+  return pot;
+}
+
 // ─── Leak Detection ─────────────────────────────────────────────────────
 
 function isWeakHolding(cards: [string, string]): boolean {
@@ -506,6 +519,110 @@ function detectLeaks(hand: Hand, playerSeat: number, bb: number): LeakHand | nul
 
     if (flopCheck && turnCall && netBB <= -5) {
       return { ...baseResult, leakType: 'check-call-bleed', leakDescription: `Check-called pattern: checked flop, called turn, lost ${Math.abs(netBB).toFixed(1)} BB` };
+    }
+  }
+
+  // Overlimp — called BB preflop with no prior raise (not from BB)
+  if (position !== 'BB') {
+    let anyRaise = false;
+    let heroOverlimped = false;
+    for (const a of actions) {
+      if (a.type === EVT.BET_RAISE) anyRaise = true;
+      if (a.seat === playerSeat && a.type === EVT.CALL && !anyRaise) {
+        heroOverlimped = true;
+        break;
+      }
+    }
+    if (heroOverlimped) {
+      return { ...baseResult, leakType: 'overlimp', leakDescription: `Limped ${cards.join('')} from ${position} — open-raising or folding is almost always better` };
+    }
+  }
+
+  // 3-bet then folded preflop
+  {
+    let raiseCount = 0;
+    let hero3Bet = false;
+    let heroFoldedPreflop = false;
+    for (const a of actions) {
+      if (a.type === EVT.BET_RAISE) {
+        raiseCount++;
+        if (a.seat === playerSeat && raiseCount >= 2) hero3Bet = true;
+      }
+      if (a.seat === playerSeat && a.type === EVT.FOLD) heroFoldedPreflop = true;
+    }
+    if (hero3Bet && heroFoldedPreflop) {
+      return { ...baseResult, leakType: '3bet-fold', leakDescription: `3-bet ${cards.join('')} then folded to 4-bet — wasted chips` };
+    }
+  }
+
+  // C-bet then folded on flop
+  if (didCBet(hand, playerSeat)) {
+    let onFlop = false;
+    let heroCBet = false;
+    let heroFoldedFlop = false;
+    for (const e of hand.events) {
+      const p = e.payload;
+      if (p.type === EVT.COMMUNITY && (p as { turn: number }).turn === 1) { onFlop = true; continue; }
+      if (p.type === EVT.COMMUNITY && (p as { turn: number }).turn >= 2) break;
+      if (!onFlop) continue;
+      if ('seat' in p && (p as { seat: number }).seat === playerSeat) {
+        if (p.type === EVT.BET_RAISE && !heroCBet) { heroCBet = true; continue; }
+        if (heroCBet && p.type === EVT.FOLD) { heroFoldedFlop = true; break; }
+      }
+    }
+    if (heroCBet && heroFoldedFlop) {
+      return { ...baseResult, leakType: 'cbet-fold', leakDescription: `C-bet then folded to raise on flop with ${cards.join('')}` };
+    }
+  }
+
+  // BB fold to min-raise
+  if (position === 'BB') {
+    let heroFoldedPreflop = false;
+    let facingSmallRaise = false;
+    for (const a of actions) {
+      if (a.seat !== playerSeat && a.type === EVT.BET_RAISE && a.value !== undefined && a.value <= 3 * bb) {
+        facingSmallRaise = true;
+      }
+      if (a.seat === playerSeat && a.type === EVT.FOLD) heroFoldedPreflop = true;
+    }
+    if (facingSmallRaise && heroFoldedPreflop) {
+      return { ...baseResult, leakType: 'bb-fold-to-minraise', leakDescription: `Folded BB with ${cards.join('')} facing a small raise — great pot odds to defend` };
+    }
+  }
+
+  // Missed value river — checked back river, went to showdown, won, pot ≥ 10 BB
+  if (playerWentToShowdown(hand, playerSeat) && netBB >= 10) {
+    let onRiver2 = false;
+    let heroCheckedRiver = false;
+    for (const e of hand.events) {
+      const p = e.payload;
+      if (p.type === EVT.COMMUNITY && (p as { turn: number }).turn === 3) { onRiver2 = true; continue; }
+      if (!onRiver2) continue;
+      if ('seat' in p && (p as { seat: number }).seat === playerSeat) {
+        if (p.type === EVT.CHECK) { heroCheckedRiver = true; break; }
+        if (p.type === EVT.BET_RAISE || p.type === EVT.CALL || p.type === EVT.FOLD) break;
+      }
+    }
+    if (heroCheckedRiver) {
+      return { ...baseResult, leakType: 'missed-value-river', leakDescription: `Checked river with ${cards.join('')}, won ${netBB.toFixed(1)} BB — missed a value bet` };
+    }
+  }
+
+  // Overbet bluff — bet ≥ pot on turn/river, lost ≥ 10 BB
+  if (netBB <= -10) {
+    const streetMap = getStreets(hand.events);
+    for (let i = 0; i < hand.events.length; i++) {
+      const p = hand.events[i].payload;
+      const street = streetMap.get(i);
+      if (street !== 'turn' && street !== 'river') continue;
+      if (!('seat' in p) || (p as { seat: number }).seat !== playerSeat) continue;
+      if (p.type !== EVT.BET_RAISE) continue;
+
+      const potBefore = getRunningPotAtAction(hand.events.map(e => ({ payload: e.payload })), i);
+      const betAmount = (p as { value: number }).value;
+      if (potBefore > 0 && betAmount >= potBefore) {
+        return { ...baseResult, leakType: 'overbet-bluff', leakDescription: `Overbet ${(betAmount / bb).toFixed(1)} BB into ${(potBefore / bb).toFixed(1)} BB pot on ${street}, lost ${Math.abs(netBB).toFixed(1)} BB` };
+      }
     }
   }
 
@@ -732,7 +849,59 @@ export function analyzeOverall(data: PokerNowExport): OverallStats {
     vpip: s.hands > 0 ? (s.vpip / s.hands) * 100 : 0,
     pfr: s.hands > 0 ? (s.pfr / s.hands) * 100 : 0,
     handsPlayed: s.hands,
+    tableRole: null as 'fish' | 'shark' | null,
   }));
+
+  // ─── Table Fish / Table Shark scoring ──────────────────────────────────
+  const MIN_HANDS = 15;
+  const qualifying = players.filter(p => p.handsPlayed >= MIN_HANDS);
+
+  if (qualifying.length >= 3) {
+    // Raw signals
+    const signals = qualifying.map(p => {
+      const winRate = (p.pnlBB / p.handsPlayed) * 100; // bb/100
+      const vpipPct = p.vpip; // already 0-100
+      const pfrPct = p.pfr;
+      const aggrRatio = vpipPct > 0 ? pfrPct / vpipPct : 0;
+      const coldCallGap = vpipPct - pfrPct;
+      return { id: p.id, winRate, aggrRatio, coldCallGap };
+    });
+
+    // Min-max normalize helper
+    const minMax = (arr: number[]) => {
+      const min = Math.min(...arr);
+      const max = Math.max(...arr);
+      const range = max - min;
+      return arr.map(v => range > 0 ? (v - min) / range : 0);
+    };
+
+    const normWin = minMax(signals.map(s => s.winRate));
+    const normAggr = minMax(signals.map(s => s.aggrRatio));
+    const normGap = minMax(signals.map(s => s.coldCallGap));
+
+    // Composite scores
+    const scores = signals.map((s, i) => ({
+      id: s.id,
+      score: 0.5 * normWin[i] + 0.3 * normAggr[i] - 0.2 * normGap[i],
+    }));
+
+    let sharkIdx = 0;
+    let fishIdx = 0;
+    for (let i = 1; i < scores.length; i++) {
+      if (scores[i].score > scores[sharkIdx].score) sharkIdx = i;
+      if (scores[i].score < scores[fishIdx].score) fishIdx = i;
+    }
+
+    // Only assign if they're different players
+    if (sharkIdx !== fishIdx) {
+      const sharkId = scores[sharkIdx].id;
+      const fishId = scores[fishIdx].id;
+      const sharkPlayer = players.find(p => p.id === sharkId);
+      const fishPlayer = players.find(p => p.id === fishId);
+      if (sharkPlayer) sharkPlayer.tableRole = 'shark';
+      if (fishPlayer) fishPlayer.tableRole = 'fish';
+    }
+  }
 
   return {
     players: players.sort((a, b) => b.pnl - a.pnl),

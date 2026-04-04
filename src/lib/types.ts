@@ -166,6 +166,7 @@ export interface OverallStats {
     vpip: number;
     pfr: number;
     handsPlayed: number;
+    tableRole: 'fish' | 'shark' | null;
   }[];
   totalHands: number;
   bigBlind: number;

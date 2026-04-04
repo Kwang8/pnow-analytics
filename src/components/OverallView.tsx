@@ -34,6 +34,11 @@ const quadrantColors: Record<string, string> = {
   'Calling Station': '#ef4444',
 };
 
+const ROLE_BADGE: Record<'shark' | 'fish', { label: string; color: string }> = {
+  shark: { label: 'Table Shark', color: '#f97316' },
+  fish: { label: 'Table Fish', color: '#60a5fa' },
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ScatterTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
@@ -101,7 +106,7 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
   return (
     <div className="space-y-6">
       {/* Session Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <div className="text-text-muted text-xs uppercase tracking-wider">Total Hands</div>
           <div className="font-mono text-2xl font-bold text-text-primary">{stats.totalHands}</div>
@@ -122,6 +127,28 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
             {stats.players[0]?.name} (+${(stats.players[0]?.pnl / 100).toFixed(2)})
           </div>
         </div>
+        {(() => {
+          const shark = stats.players.find(p => p.tableRole === 'shark');
+          const fish = stats.players.find(p => p.tableRole === 'fish');
+          return (
+            <>
+              {shark && (
+                <div className="bg-bg-card border border-border rounded-lg p-4">
+                  <div className="text-xs uppercase tracking-wider" style={{ color: ROLE_BADGE.shark.color }}>Table Shark</div>
+                  <div className="font-mono text-lg font-bold text-text-primary truncate">{shark.name}</div>
+                  <div className="font-mono text-xs text-text-muted">{((shark.pnlBB / shark.handsPlayed) * 100).toFixed(1)} bb/100</div>
+                </div>
+              )}
+              {fish && (
+                <div className="bg-bg-card border border-border rounded-lg p-4">
+                  <div className="text-xs uppercase tracking-wider" style={{ color: ROLE_BADGE.fish.color }}>Table Fish</div>
+                  <div className="font-mono text-lg font-bold text-text-primary truncate">{fish.name}</div>
+                  <div className="font-mono text-xs text-text-muted">{((fish.pnlBB / fish.handsPlayed) * 100).toFixed(1)} bb/100</div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Player Style Quadrant */}
@@ -197,6 +224,7 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
               <th className="text-right p-3 font-mono">VPIP</th>
               <th className="text-right p-3 font-mono">PFR</th>
               <th className="text-right p-3 font-mono">Style</th>
+              <th className="text-center p-3 font-mono">Role</th>
               <th className="text-left p-3">HCL Twin</th>
               <th className="text-right p-3 font-mono">P&L ($)</th>
               {user && gameId && <th className="text-center p-3 w-20"></th>}
@@ -220,6 +248,13 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlay
                     <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: quadrantColors[style.label], background: `${quadrantColors[style.label]}15` }}>
                       {style.label}
                     </span>
+                  </td>
+                  <td className="p-3 text-center">
+                    {p.tableRole && (
+                      <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: ROLE_BADGE[p.tableRole].color, background: `${ROLE_BADGE[p.tableRole].color}15` }}>
+                        {ROLE_BADGE[p.tableRole].label}
+                      </span>
+                    )}
                   </td>
                   <td className="p-3">
                     <HCLMiniAvatar player={hcl.player} />

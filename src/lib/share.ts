@@ -89,7 +89,7 @@ export function decodeShareData(encoded: string): { overall: OverallStats; playe
       bigBlind: data.bb,
       players: data.p.map(p => ({
         id: p.id, name: p.n, pnl: p.pnl, pnlBB: p.pbb,
-        vpip: p.v, pfr: p.r, handsPlayed: p.h,
+        vpip: p.v, pfr: p.r, handsPlayed: p.h, tableRole: null,
       })),
     };
 

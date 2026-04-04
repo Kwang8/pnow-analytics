@@ -9,6 +9,7 @@ import HCLComparison from './HCLComparison';
 interface Props {
   stats: PlayerStats;
   onBack: () => void;
+  isSharedView?: boolean;
 }
 
 function getHealth(stat: string, value: number): StatHealth {
@@ -33,13 +34,16 @@ function getHealth(stat: string, value: number): StatHealth {
   return 'good';
 }
 
-const tabs = ['Stats', 'Leaks', 'Key Hands', 'Position'] as const;
+const allTabs = ['Stats', 'Leaks', 'Key Hands', 'Position'] as const;
+const sharedTabs = ['Stats', 'Position'] as const;
 
-export default function Dashboard({ stats, onBack }: Props) {
-  const [activeTab, setActiveTab] = useState<typeof tabs[number]>('Stats');
+export default function Dashboard({ stats, onBack, isSharedView }: Props) {
+  const tabs = isSharedView ? sharedTabs : allTabs;
+  const [activeTab, setActiveTab] = useState<typeof allTabs[number]>('Stats');
 
-  const pnlColor = stats.totalPnlBB >= 0 ? 'text-stat-green' : 'text-stat-red';
-  const pnlSign = stats.totalPnlBB >= 0 ? '+' : '';
+  const pnlDollars = stats.totalPnl / 100;
+  const pnlColor = pnlDollars >= 0 ? 'text-stat-green' : 'text-stat-red';
+  const pnlSign = pnlDollars >= 0 ? '+' : '';
 
   const afDisplay = (val: number) => val === Infinity ? '∞' : val.toFixed(1);
 
@@ -59,10 +63,10 @@ export default function Dashboard({ stats, onBack }: Props) {
         <div className="text-right">
           <div className="text-text-muted text-xs uppercase tracking-wider">Session P&L</div>
           <div className={`font-mono text-3xl font-bold ${pnlColor}`}>
-            {pnlSign}{stats.totalPnlBB.toFixed(1)} BB
+            {pnlSign}${Math.abs(pnlDollars).toFixed(2)}
           </div>
           <div className="text-text-muted font-mono text-sm">
-            {pnlSign}${(stats.totalPnl / 100).toFixed(2)}
+            {stats.totalPnlBB >= 0 ? '+' : ''}{stats.totalPnlBB.toFixed(1)} BB
           </div>
         </div>
       </div>

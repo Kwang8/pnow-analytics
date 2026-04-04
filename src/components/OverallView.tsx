@@ -1,14 +1,20 @@
 import { useMemo, useState } from 'react';
 import type { OverallStats } from '../lib/types';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell,
-  ScatterChart, Scatter, ReferenceLine, ZAxis, Label, Tooltip,
+  ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+  ReferenceLine, ZAxis, Label, Tooltip,
 } from 'recharts';
 import { findMostSimilarHCL } from '../lib/hclPlayers';
+import { useAuth } from '../lib/AuthContext';
+import { claimPlayer } from '../lib/gameStore';
+import { User, Check, Loader2 } from 'lucide-react';
 
 interface Props {
   stats: OverallStats;
   onSelectPlayer: (id: string) => void;
+  gameId?: string | null;
+  claimedPlayerIds?: Set<string>;
+  onClaimed?: (pokerNowPlayerId: string) => void;
 }
 
 function getPlayerStyle(vpip: number, pfr: number): { label: string; category: string } {
@@ -29,20 +35,6 @@ const quadrantColors: Record<string, string> = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function PnlTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  const value = payload[0].value as number;
-  return (
-    <div style={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, padding: '8px 12px', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
-      <div style={{ color: '#e2e8f0', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: value >= 0 ? '#22c55e' : '#ef4444' }}>
-        P&L: {value > 0 ? '+' : ''}{value.toFixed(1)} BB
-      </div>
-    </div>
-  );
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function ScatterTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
@@ -55,7 +47,7 @@ function ScatterTooltip({ active, payload }: any) {
       <div style={{ color: '#94a3b8' }}>VPIP: {d.vpip.toFixed(1)}%</div>
       <div style={{ color: '#94a3b8' }}>PFR: {d.pfr.toFixed(1)}%</div>
       <div style={{ color: m.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-        P&L: {m.pnl > 0 ? '+' : ''}{m.pnl.toFixed(1)} BB
+        P&L: {m.pnl >= 0 ? '+' : ''}${m.pnl.toFixed(2)}
       </div>
     </div>
   );
@@ -83,16 +75,9 @@ function HCLMiniAvatar({ player }: { player: import('../lib/hclPlayers').HCLPlay
   );
 }
 
-export default function OverallView({ stats, onSelectPlayer }: Props) {
-  const pnlData = useMemo(() =>
-    stats.players.map(p => ({
-      name: p.name,
-      pnl: p.pnlBB,
-      barColor: p.pnlBB >= 0 ? '#22c55e' : '#ef4444',
-    })),
-    [stats]
-  );
-
+export default function OverallView({ stats, onSelectPlayer, gameId, claimedPlayerIds, onClaimed }: Props) {
+  const { user } = useAuth();
+  const [claiming, setClaiming] = useState<string | null>(null);
   const scatterData = useMemo(() =>
     stats.players.map(p => {
       const s = getPlayerStyle(p.vpip, p.pfr);
@@ -104,7 +89,7 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
         meta: {
           name: p.name,
           id: p.id,
-          pnl: p.pnlBB,
+          pnl: p.pnl / 100,
           styleLabel: s.label,
           fill: quadrantColors[s.label],
         },
@@ -134,33 +119,9 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <div className="text-text-muted text-xs uppercase tracking-wider">Biggest Winner</div>
           <div className="font-mono text-xl font-bold text-stat-green">
-            {stats.players[0]?.name} (+{stats.players[0]?.pnlBB.toFixed(1)})
+            {stats.players[0]?.name} (+${(stats.players[0]?.pnl / 100).toFixed(2)})
           </div>
         </div>
-      </div>
-
-      {/* PnL Chart */}
-      <div className="bg-bg-card border border-border rounded-lg p-6">
-        <h3 className="text-text-primary font-semibold mb-4">Session P&L (BB)</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={pnlData} layout="vertical" margin={{ left: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e2a3a" horizontal={false} />
-            <XAxis type="number" stroke="#64748b" tick={{ fill: '#94a3b8', fontFamily: 'JetBrains Mono', fontSize: 12 }} />
-            <YAxis
-              type="category"
-              dataKey="name"
-              stroke="#64748b"
-              tick={{ fill: '#e2e8f0', fontSize: 13 }}
-              width={100}
-            />
-            <Tooltip content={<PnlTooltip />} />
-            <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
-              {pnlData.map((entry, i) => (
-                <Cell key={i} fill={entry.barColor} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
       </div>
 
       {/* Player Style Quadrant */}
@@ -237,7 +198,8 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
               <th className="text-right p-3 font-mono">PFR</th>
               <th className="text-right p-3 font-mono">Style</th>
               <th className="text-left p-3">HCL Twin</th>
-              <th className="text-right p-3 font-mono">P&L (BB)</th>
+              <th className="text-right p-3 font-mono">P&L ($)</th>
+              {user && gameId && <th className="text-center p-3 w-20"></th>}
             </tr>
           </thead>
           <tbody>
@@ -262,9 +224,43 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
                   <td className="p-3">
                     <HCLMiniAvatar player={hcl.player} />
                   </td>
-                  <td className={`p-3 text-right font-mono font-bold ${p.pnlBB >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                    {p.pnlBB >= 0 ? '+' : ''}{p.pnlBB.toFixed(1)}
+                  <td className={`p-3 text-right font-mono font-bold ${p.pnl >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+                    {p.pnl >= 0 ? '+' : ''}${(p.pnl / 100).toFixed(2)}
                   </td>
+                  {user && gameId && (
+                    <td className="p-3 text-center">
+                      {claimedPlayerIds?.has(p.id) ? (
+                        <span className="inline-flex items-center gap-1 text-stat-green text-xs font-medium">
+                          <Check className="w-3 h-3" /> Me
+                        </span>
+                      ) : (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!gameId || claiming) return;
+                            setClaiming(p.id);
+                            try {
+                              await claimPlayer(gameId, user.uid, user.email ?? '', p.id);
+                              onClaimed?.(p.id);
+                            } catch (err) {
+                              console.error('Claim failed:', err);
+                            }
+                            setClaiming(null);
+                          }}
+                          disabled={!!claiming}
+                          className="inline-flex items-center gap-1 text-text-muted hover:text-accent text-xs px-2 py-1 rounded hover:bg-bg-hover transition-colors"
+                          title="Link this player to your account"
+                        >
+                          {claiming === p.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <User className="w-3 h-3" />
+                          )}
+                          This is me
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

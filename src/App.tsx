@@ -1,93 +1,449 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { PokerNowExport, PlayerStats, OverallStats } from './lib/types';
 import { analyzePlayer, analyzeOverall } from './lib/analysis';
-import Upload from './components/Upload';
+import { decodeShareData, getShareDataFromUrl } from './lib/share';
+import { saveGame, getGameRawData, findExistingGame, getClaimedPlayers, type GameDoc } from './lib/gameStore';
+import { useAuth } from './lib/AuthContext';
+import LoginScreen from './components/LoginScreen';
+import UsernameSetup from './components/UsernameSetup';
 import OverallView from './components/OverallView';
 import Dashboard from './components/Dashboard';
-import { RotateCcw } from 'lucide-react';
+import GameLibrary from './components/GameLibrary';
+import MyStats from './components/MyStats';
+import Leaderboard from './components/Leaderboard';
+import AuthButton from './components/AuthButton';
+import AddFriend from './components/AddFriend';
+import { Share2, Check, BarChart3, Trophy, UserPlus, Plus, Loader2, Menu, X } from 'lucide-react';
 
-type View = 'upload' | 'overall' | 'player';
+type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard';
 
 export default function App() {
+  const { user, loading: authLoading, needsUsername } = useAuth();
   const [data, setData] = useState<PokerNowExport | null>(null);
-  const [view, setView] = useState<View>('upload');
+  const [contentView, setContentView] = useState<ContentView>('empty');
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [isSharedView, setIsSharedView] = useState(false);
+  const [sharedOverall, setSharedOverall] = useState<OverallStats | null>(null);
+  const [sharedPlayerMap, setSharedPlayerMap] = useState<Map<string, PlayerStats> | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Saved game tracking
+  const [currentGameId, setCurrentGameId] = useState<string | null>(null);
+  const [currentGameDoc, setCurrentGameDoc] = useState<GameDoc | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  // Map of gameId -> Set of claimed pokerNow player IDs
+  const [claimedMap, setClaimedMap] = useState<Map<string, Set<string>>>(new Map());
+
+  // Mobile sidebar
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Check for shared game in URL on mount
+  useEffect(() => {
+    const hash = window.location.hash;
+    // New short format: #g=<gameId>
+    if (hash.startsWith('#g=')) {
+      const gameId = hash.slice(3);
+      if (gameId) {
+        getGameRawData(gameId).then(raw => {
+          if (raw) {
+            setData(raw);
+            setCurrentGameId(gameId);
+            setIsSharedView(true);
+            setContentView('overall');
+          }
+        });
+      }
+      return;
+    }
+    // Legacy format: #s=<compressed data>
+    const encoded = getShareDataFromUrl();
+    if (encoded) {
+      const result = decodeShareData(encoded);
+      if (result) {
+        setSharedOverall(result.overall);
+        setSharedPlayerMap(result.playerStatsMap);
+        setIsSharedView(true);
+        setContentView('overall');
+      }
+    }
+  }, []);
 
   const overallStats = useMemo<OverallStats | null>(() => {
-    if (!data) return null;
-    return analyzeOverall(data);
-  }, [data]);
+    if (data) return analyzeOverall(data);
+    if (isSharedView) return sharedOverall;
+    return null;
+  }, [data, isSharedView, sharedOverall]);
 
   const playerStats = useMemo<PlayerStats | null>(() => {
-    if (!data || !selectedPlayerId) return null;
-    return analyzePlayer(data, selectedPlayerId);
-  }, [data, selectedPlayerId]);
+    if (!selectedPlayerId) return null;
+    if (data) return analyzePlayer(data, selectedPlayerId);
+    if (isSharedView && sharedPlayerMap) {
+      return sharedPlayerMap.get(selectedPlayerId) ?? null;
+    }
+    return null;
+  }, [data, selectedPlayerId, isSharedView, sharedPlayerMap]);
 
-  const handleUpload = useCallback((parsed: PokerNowExport) => {
+  const handleFileSelected = useCallback(async (file: File) => {
+    setUploadError(null);
+    const text = await file.text();
+    let parsed: PokerNowExport;
+    try {
+      parsed = JSON.parse(text) as PokerNowExport;
+      if (!parsed.hands || !Array.isArray(parsed.hands)) {
+        throw new Error('Invalid format: missing "hands" array');
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to parse JSON');
+      return;
+    }
+
     setData(parsed);
-    setView('overall');
+    setIsSharedView(false);
+    setSharedOverall(null);
+    setSharedPlayerMap(null);
+    setCurrentGameId(null);
+    setCurrentGameDoc(null);
+    setSelectedPlayerId(null);
+
+    setContentView('overall');
+    setSidebarOpen(false);
+    if (window.location.hash) {
+      history.replaceState(null, '', window.location.pathname);
+    }
+
+    // Auto-save
+    if (user) {
+      const overall = analyzeOverall(parsed);
+      setSaving(true);
+      try {
+        const existing = await findExistingGame(user.uid, parsed.gameId);
+        if (existing) {
+          setCurrentGameId(existing);
+          loadClaims(existing);
+        } else {
+          const id = await saveGame(user.uid, user.email ?? '', parsed, overall);
+          setCurrentGameId(id);
+          setRefreshKey(k => k + 1);
+        }
+      } catch (e) {
+        console.error('Failed to save game:', e);
+      }
+      setSaving(false);
+    }
+  }, [user]);
+
+  const triggerUpload = useCallback(() => {
+    setUploadError(null);
+    fileInputRef.current?.click();
   }, []);
+
+  const loadClaims = useCallback(async (gameId: string) => {
+    if (!user) return;
+    const ids = await getClaimedPlayers(gameId, user.uid);
+    if (ids.length > 0) {
+      setClaimedMap(prev => {
+        const next = new Map(prev);
+        next.set(gameId, new Set(ids));
+        return next;
+      });
+    }
+  }, [user]);
+
+  const handleOpenGame = useCallback(async (gameId: string) => {
+    const raw = await getGameRawData(gameId);
+    if (raw) {
+      setData(raw);
+      setCurrentGameId(gameId);
+      setIsSharedView(false);
+      setSharedOverall(null);
+      setSharedPlayerMap(null);
+      setSelectedPlayerId(null);
+
+      setContentView('overall');
+      setSidebarOpen(false);
+      loadClaims(gameId);
+    }
+  }, [loadClaims]);
 
   const handleSelectPlayer = useCallback((id: string) => {
     setSelectedPlayerId(id);
-    setView('player');
+    setContentView('player');
   }, []);
 
-  const handleBack = useCallback(() => {
-    setView('overall');
+  const handleBackToOverall = useCallback(() => {
+    setContentView('overall');
     setSelectedPlayerId(null);
+    setShowAddFriend(false);
   }, []);
 
-  const handleReset = useCallback(() => {
-    setData(null);
-    setView('upload');
-    setSelectedPlayerId(null);
-  }, []);
+  const handleShare = useCallback(() => {
+    if (!currentGameId) return;
+    const url = `${window.location.origin}${window.location.pathname}#g=${currentGameId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [currentGameId]);
+
+  // Build game doc for add-friend
+  useEffect(() => {
+    if (currentGameId && overallStats && user) {
+      setCurrentGameDoc({
+        id: currentGameId,
+        uploadedBy: user.uid,
+        playerSummaries: overallStats.players.map(p => ({
+          pokerNowId: p.id,
+          name: p.name,
+          pnl: p.pnl,
+          pnlBB: p.pnlBB,
+          vpip: p.vpip,
+          pfr: p.pfr,
+          handsPlayed: p.handsPlayed,
+        })),
+        members: [user.uid],
+        memberEmails: [user.email ?? ''],
+      } as GameDoc);
+    }
+  }, [currentGameId, overallStats, user]);
+
+  const isMyGame = !!(currentGameId && user && currentGameDoc?.uploadedBy === user.uid);
+
+  // Hidden file input
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".json"
+      className="hidden"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (file) handleFileSelected(file);
+        e.target.value = '';
+      }}
+    />
+  );
+
+  // Auth loading
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-bg-primary flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-accent" />
+      </div>
+    );
+  }
+
+  // Not logged in
+  if (!user && !isSharedView) {
+    return <div className="min-h-screen bg-bg-primary"><LoginScreen /></div>;
+  }
+
+  // Needs username setup
+  if (user && needsUsername && !isSharedView) {
+    return <UsernameSetup />;
+  }
+
+  // ─── Sidebar content ─────────────────────────────────────────────────
+  const sidebarContent = (
+    <div className="flex flex-col h-full">
+      {/* New Game button */}
+      <div className="p-3 space-y-2">
+        <button
+          onClick={triggerUpload}
+          className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/85 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          New Game
+        </button>
+        <button
+          onClick={() => { setContentView('mystats'); setSidebarOpen(false); }}
+          className={`w-full flex items-center gap-2 text-sm px-3 py-2 rounded-md transition-colors ${
+            contentView === 'mystats'
+              ? 'bg-accent/15 text-accent'
+              : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          My Stats
+        </button>
+        <button
+          onClick={() => { setContentView('leaderboard'); setSidebarOpen(false); }}
+          className={`w-full flex items-center gap-2 text-sm px-3 py-2 rounded-md transition-colors ${
+            contentView === 'leaderboard'
+              ? 'bg-accent/15 text-accent'
+              : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+          }`}
+        >
+          <Trophy className="w-4 h-4" />
+          Leaderboard
+        </button>
+      </div>
+
+      {uploadError && (
+        <div className="mx-3 mb-2 px-2 py-1.5 bg-stat-red/10 border border-stat-red/30 rounded text-stat-red text-[10px]">
+          {uploadError}
+        </div>
+      )}
+
+      {/* Divider + game list */}
+      <div className="border-t border-border mx-3" />
+      <div className="px-3 pt-2 pb-1">
+        <span className="text-text-muted text-[10px] uppercase tracking-wider font-medium">Games</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-1.5 pb-3">
+        {user && (
+          <GameLibrary
+            onOpenGame={handleOpenGame}
+            selectedGameId={currentGameId}
+            refreshKey={refreshKey}
+          />
+        )}
+      </div>
+
+      {/* User at bottom */}
+      <div className="border-t border-border p-3">
+        <AuthButton />
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-bg-primary">
-      {view !== 'upload' && (
-        <header className="border-b border-border bg-bg-secondary/80 backdrop-blur-sm sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-            <h1
-              className="text-xl font-bold cursor-pointer"
-              onClick={handleBack}
+    <div className="min-h-screen bg-bg-primary flex flex-col">
+      {fileInput}
+
+      {/* Header */}
+      <header className="border-b border-border bg-bg-secondary/80 backdrop-blur-sm sticky top-0 z-50 shrink-0">
+        <div className="px-4 py-3 flex items-center justify-between">
+          {/* Left: hamburger (mobile) + logo */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="md:hidden text-text-muted hover:text-text-primary p-1"
             >
+              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            <h1 className="text-xl font-bold">
               <span className="text-accent">Poker</span><span className="text-text-primary">Scope</span>
             </h1>
-            <div className="flex items-center gap-3">
-              {view === 'overall' && (
-                <span className="text-text-muted text-sm">
-                  {overallStats?.totalHands} hands · {overallStats?.players.length} players
-                </span>
-              )}
+          </div>
+
+          {/* Right: context actions */}
+          <div className="flex items-center gap-2">
+            {isSharedView && (
+              <span className="text-xs px-2 py-1 rounded bg-accent/15 text-accent font-medium">
+                Shared
+              </span>
+            )}
+            {saving && (
+              <span className="text-xs px-2 py-1 rounded bg-stat-green/15 text-stat-green font-medium animate-pulse">
+                Saving...
+              </span>
+            )}
+            {contentView === 'overall' && isMyGame && (
               <button
-                onClick={handleReset}
+                onClick={() => setShowAddFriend(!showAddFriend)}
                 className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors px-3 py-1.5 rounded-md hover:bg-bg-hover"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                New file
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Add Friend</span>
               </button>
+            )}
+            {(contentView === 'overall' || contentView === 'player') && currentGameId && (
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors px-3 py-1.5 rounded-md hover:bg-bg-hover"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-stat-green" />
+                    <span className="text-stat-green hidden md:inline">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline">Share</span>
+                  </>
+                )}
+              </button>
+            )}
+            {/* Auth shown in sidebar on desktop, header on mobile */}
+            <div className="md:hidden">
+              <AuthButton />
             </div>
           </div>
-        </header>
-      )}
+        </div>
+      </header>
 
-      <main className={view === 'upload' ? '' : 'max-w-6xl mx-auto px-4 py-6'}>
-        {view === 'upload' && <Upload onUpload={handleUpload} />}
-        {view === 'overall' && overallStats && (
-          <OverallView stats={overallStats} onSelectPlayer={handleSelectPlayer} />
-        )}
-        {view === 'player' && playerStats && (
-          <Dashboard stats={playerStats} onBack={handleBack} />
-        )}
-      </main>
+      {/* Body: sidebar + main */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar — desktop: always visible, mobile: overlay */}
+        {/* Desktop sidebar */}
+        <aside className="hidden md:flex w-64 border-r border-border bg-bg-secondary shrink-0 flex-col">
+          {sidebarContent}
+        </aside>
 
-      {view !== 'upload' && (
-        <footer className="border-t border-border mt-12 py-4 text-center text-text-muted text-xs">
-          All analysis runs locally — no data leaves your browser
-        </footer>
-      )}
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+            <aside className="relative w-72 h-full bg-bg-secondary border-r border-border flex flex-col">
+              {sidebarContent}
+            </aside>
+          </div>
+        )}
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-4 py-6">
+            {contentView === 'empty' && (
+              <div className="flex flex-col items-center justify-center py-24 text-text-muted">
+                <p className="text-lg mb-2">Select a game or upload a new one</p>
+                <p className="text-sm">Use the sidebar to browse your sessions</p>
+              </div>
+            )}
+
+            {contentView === 'overall' && overallStats && (
+              <div className="space-y-6">
+                {showAddFriend && currentGameId && currentGameDoc && (
+                  <AddFriend
+                    gameId={currentGameId}
+                    players={currentGameDoc.playerSummaries}
+                    existingMembers={currentGameDoc.members}
+                    onDone={() => setShowAddFriend(false)}
+                  />
+                )}
+                <OverallView
+                  stats={overallStats}
+                  onSelectPlayer={handleSelectPlayer}
+                  gameId={currentGameId}
+                  claimedPlayerIds={currentGameId ? claimedMap.get(currentGameId) : undefined}
+                  onClaimed={(id) => {
+                    if (!currentGameId) return;
+                    setClaimedMap(prev => {
+                      const next = new Map(prev);
+                      const set = new Set(next.get(currentGameId) ?? []);
+                      set.add(id);
+                      next.set(currentGameId, set);
+                      return next;
+                    });
+                  }}
+                />
+              </div>
+            )}
+
+            {contentView === 'player' && playerStats && (
+              <Dashboard stats={playerStats} onBack={handleBackToOverall} isSharedView={isSharedView} />
+            )}
+
+            {contentView === 'mystats' && <MyStats />}
+
+            {contentView === 'leaderboard' && <Leaderboard />}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

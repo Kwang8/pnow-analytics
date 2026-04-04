@@ -126,17 +126,29 @@ export default function HandCard({ hand, compact }: Props) {
       </div>
 
       {/* Action sequence by street */}
-      <div className="space-y-1 text-xs">
+      <div className="space-y-2 text-xs">
         {Array.from(streetActions.entries()).map(([street, acts]) => (
-          <div key={street} className="flex items-start gap-2">
-            <span className="text-text-muted w-14 shrink-0 uppercase font-mono">{street}</span>
-            <div className="flex flex-wrap gap-1">
-              {acts.map((a, i) => (
-                <span key={i} className={`${actionColors[a.action]} ${a.isHero ? 'font-bold' : 'opacity-60'}`}>
-                  {a.isHero ? '●' : ''}{a.playerName.slice(0, 6)}:{a.action}
-                  {a.amount ? ` ${(a.amount / hand.bigBlind).toFixed(1)}bb` : ''}
-                </span>
-              ))}
+          <div key={street} className="flex items-start gap-3">
+            <span className="text-text-muted w-14 shrink-0 uppercase font-mono text-[11px] pt-0.5">{street}</span>
+            <div className="flex flex-wrap gap-x-1.5 gap-y-1">
+              {acts.map((a, i) => {
+                const bb = a.amount ? (a.amount / hand.bigBlind).toFixed(1) : '';
+                return (
+                  <span
+                    key={i}
+                    className={`inline-flex items-center gap-1 ${a.isHero ? '' : 'opacity-50'}`}
+                  >
+                    {a.isHero && <span className="text-accent">●</span>}
+                    <span className={`${a.isHero ? 'text-text-primary font-semibold' : 'text-text-secondary'}`}>
+                      {a.playerName.length > 8 ? a.playerName.slice(0, 8) : a.playerName}
+                    </span>
+                    <span className={`${actionColors[a.action]} ${a.isHero ? 'font-semibold' : ''}`}>
+                      {a.action}{bb ? ` ${bb}bb` : ''}
+                    </span>
+                    {i < acts.length - 1 && <span className="text-border ml-0.5">·</span>}
+                  </span>
+                );
+              })}
             </div>
           </div>
         ))}

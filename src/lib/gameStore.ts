@@ -197,7 +197,7 @@ export async function searchUserByUsername(username: string): Promise<{ uid: str
   return { uid: d.id, ...d.data() } as { uid: string; displayName: string; email: string; photoURL: string; username: string };
 }
 
-// ─── Add Friend to Game ─────────────────────────────────────────────────
+// ──�� Add Friend (cross-add to all games) ─────────────���──────────────────
 
 export async function searchUserByEmail(email: string): Promise<{ uid: string; displayName: string; email: string; photoURL: string } | null> {
   const q = query(collection(db, 'users'), where('email', '==', email.toLowerCase()));
@@ -207,23 +207,37 @@ export async function searchUserByEmail(email: string): Promise<{ uid: string; d
   return { uid: d.id, ...d.data() } as { uid: string; displayName: string; email: string; photoURL: string };
 }
 
-export async function addFriendToGame(
-  gameId: string,
+export async function addFriend(
+  myUid: string,
+  myEmail: string,
   friendUid: string,
   friendEmail: string,
-  pokerNowPlayerId: string,
 ): Promise<void> {
-  const gameRef = doc(db, 'games', gameId);
+  // Get all games where I'm a member → add friend
+  const myGamesQ = query(collection(db, 'games'), where('members', 'array-contains', myUid));
+  const myGames = await getDocs(myGamesQ);
 
-  // Add friend to members
-  await updateDoc(gameRef, {
-    members: arrayUnion(friendUid),
-    memberEmails: arrayUnion(friendEmail),
-  });
+  // Get all games where friend is a member → add me
+  const friendGamesQ = query(collection(db, 'games'), where('members', 'array-contains', friendUid));
+  const friendGames = await getDocs(friendGamesQ);
 
-  // Link the gamePlayer doc to the friend's UID
-  const gpRef = doc(db, 'gamePlayers', `${gameId}_${pokerNowPlayerId}`);
-  await updateDoc(gpRef, { uid: friendUid });
+  const batch = writeBatch(db);
+
+  for (const g of myGames.docs) {
+    batch.update(g.ref, {
+      members: arrayUnion(friendUid),
+      memberEmails: arrayUnion(friendEmail),
+    });
+  }
+
+  for (const g of friendGames.docs) {
+    batch.update(g.ref, {
+      members: arrayUnion(myUid),
+      memberEmails: arrayUnion(myEmail),
+    });
+  }
+
+  await batch.commit();
 }
 
 // ─── Claim "This is me" ─────────────────────────────────────────────────

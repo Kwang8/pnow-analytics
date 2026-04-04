@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { PokerNowExport, PlayerStats, OverallStats } from './lib/types';
 import { analyzePlayer, analyzeOverall } from './lib/analysis';
 import { decodeShareData, getShareDataFromUrl } from './lib/share';
-import { saveGame, getGameRawData, findExistingGame, getClaimedPlayers, type GameDoc } from './lib/gameStore';
+import { saveGame, getGameRawData, findExistingGame, getClaimedPlayers } from './lib/gameStore';
 import { useAuth } from './lib/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import UsernameSetup from './components/UsernameSetup';
@@ -31,7 +31,6 @@ export default function App() {
 
   // Saved game tracking
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
-  const [currentGameDoc, setCurrentGameDoc] = useState<GameDoc | null>(null);
   const [saving, setSaving] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -106,7 +105,6 @@ export default function App() {
     setSharedOverall(null);
     setSharedPlayerMap(null);
     setCurrentGameId(null);
-    setCurrentGameDoc(null);
     setSelectedPlayerId(null);
 
     setContentView('overall');
@@ -189,29 +187,6 @@ export default function App() {
     });
   }, [currentGameId]);
 
-  // Build game doc for add-friend
-  useEffect(() => {
-    if (currentGameId && overallStats && user) {
-      setCurrentGameDoc({
-        id: currentGameId,
-        uploadedBy: user.uid,
-        playerSummaries: overallStats.players.map(p => ({
-          pokerNowId: p.id,
-          name: p.name,
-          pnl: p.pnl,
-          pnlBB: p.pnlBB,
-          vpip: p.vpip,
-          pfr: p.pfr,
-          handsPlayed: p.handsPlayed,
-        })),
-        members: [user.uid],
-        memberEmails: [user.email ?? ''],
-      } as GameDoc);
-    }
-  }, [currentGameId, overallStats, user]);
-
-  const isMyGame = !!(currentGameId && user && currentGameDoc?.uploadedBy === user.uid);
-
   // Hidden file input
   const fileInput = (
     <input
@@ -257,6 +232,13 @@ export default function App() {
         >
           <Plus className="w-4 h-4" />
           New Game
+        </button>
+        <button
+          onClick={() => setShowAddFriend(true)}
+          className="w-full flex items-center justify-center gap-2 bg-stat-green hover:bg-stat-green/85 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+        >
+          <UserPlus className="w-4 h-4" />
+          Add Friend
         </button>
         <button
           onClick={() => { setContentView('mystats'); setSidebarOpen(false); }}
@@ -313,6 +295,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
       {fileInput}
+      {showAddFriend && (
+        <AddFriend onDone={() => { setShowAddFriend(false); setRefreshKey(k => k + 1); }} />
+      )}
 
       {/* Header */}
       <header className="border-b border-border bg-bg-secondary/80 backdrop-blur-sm sticky top-0 z-50 shrink-0">
@@ -341,15 +326,6 @@ export default function App() {
               <span className="text-xs px-2 py-1 rounded bg-stat-green/15 text-stat-green font-medium animate-pulse">
                 Saving...
               </span>
-            )}
-            {contentView === 'overall' && isMyGame && (
-              <button
-                onClick={() => setShowAddFriend(!showAddFriend)}
-                className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors px-3 py-1.5 rounded-md hover:bg-bg-hover"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Add Friend</span>
-              </button>
             )}
             {(contentView === 'overall' || contentView === 'player') && currentGameId && (
               <button
@@ -407,14 +383,6 @@ export default function App() {
 
             {contentView === 'overall' && overallStats && (
               <div className="space-y-6">
-                {showAddFriend && currentGameId && currentGameDoc && (
-                  <AddFriend
-                    gameId={currentGameId}
-                    players={currentGameDoc.playerSummaries}
-                    existingMembers={currentGameDoc.members}
-                    onDone={() => setShowAddFriend(false)}
-                  />
-                )}
                 <OverallView
                   stats={overallStats}
                   onSelectPlayer={handleSelectPlayer}

@@ -45,15 +45,16 @@ function PnlTooltip({ active, payload, label }: any) {
 function ScatterTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
+  const m = d.meta;
   return (
     <div style={{ background: '#141a23', border: '1px solid #1e2a3a', borderRadius: 8, padding: '8px 12px', fontFamily: 'JetBrains Mono', fontSize: 12 }}>
       <div style={{ color: '#e2e8f0', fontWeight: 600, marginBottom: 4 }}>
-        {d.name} — {d.style}
+        {m.name} — {m.styleLabel}
       </div>
       <div style={{ color: '#94a3b8' }}>VPIP: {d.vpip.toFixed(1)}%</div>
       <div style={{ color: '#94a3b8' }}>PFR: {d.pfr.toFixed(1)}%</div>
-      <div style={{ color: d.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-        P&L: {d.pnl > 0 ? '+' : ''}{d.pnl.toFixed(1)} BB
+      <div style={{ color: m.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+        P&L: {m.pnl > 0 ? '+' : ''}{m.pnl.toFixed(1)} BB
       </div>
     </div>
   );
@@ -64,24 +65,26 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
     stats.players.map(p => ({
       name: p.name,
       pnl: p.pnlBB,
-      fill: p.pnlBB >= 0 ? '#22c55e' : '#ef4444',
+      barColor: p.pnlBB >= 0 ? '#22c55e' : '#ef4444',
     })),
     [stats]
   );
 
   const scatterData = useMemo(() =>
     stats.players.map(p => {
-      const style = getPlayerStyle(p.vpip, p.pfr);
+      const s = getPlayerStyle(p.vpip, p.pfr);
       return {
-        name: p.name,
-        id: p.id,
         vpip: p.vpip,
         pfr: p.pfr,
-        pnl: p.pnlBB,
-        style: style.label,
-        category: style.category,
-        fill: quadrantColors[style.label],
         hands: p.handsPlayed,
+        // Metadata stored under a single key so Recharts doesn't spread it onto SVG elements
+        meta: {
+          name: p.name,
+          id: p.id,
+          pnl: p.pnlBB,
+          styleLabel: s.label,
+          fill: quadrantColors[s.label],
+        },
       };
     }),
     [stats]
@@ -130,7 +133,7 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
             <Tooltip content={<PnlTooltip />} />
             <Bar dataKey="pnl" radius={[0, 4, 4, 0]}>
               {pnlData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
+                <Cell key={i} fill={entry.barColor} />
               ))}
             </Bar>
           </BarChart>
@@ -166,9 +169,9 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
             <ReferenceLine y={15} stroke="#22c55e" strokeWidth={2} strokeOpacity={0.6} />
             <Tooltip content={<ScatterTooltip />} />
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <Scatter data={scatterData} cursor="pointer" onClick={(d: any) => onSelectPlayer(d.id)}>
+            <Scatter data={scatterData} cursor="pointer" onClick={(d: any) => onSelectPlayer(d.meta.id)}>
               {scatterData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} fillOpacity={0.85} stroke={entry.fill} strokeWidth={1} />
+                <Cell key={i} fill={entry.meta.fill} fillOpacity={0.85} stroke={entry.meta.fill} strokeWidth={1} />
               ))}
             </Scatter>
           </ScatterChart>

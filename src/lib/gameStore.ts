@@ -121,10 +121,10 @@ export async function getMyGames(uid: string): Promise<GameDoc[]> {
   );
   const snap = await getDocs(q);
   const games = snap.docs.map(d => ({ id: d.id, ...d.data() } as GameDoc));
-  // Sort client-side to avoid needing a composite index
+  // Sort by game date (newest first), fall back to createdAt
   games.sort((a, b) => {
-    const aTime = a.createdAt?.toMillis?.() ?? 0;
-    const bTime = b.createdAt?.toMillis?.() ?? 0;
+    const aTime = a.gameDate ? new Date(a.gameDate).getTime() : (a.createdAt?.toMillis?.() ?? 0);
+    const bTime = b.gameDate ? new Date(b.gameDate).getTime() : (b.createdAt?.toMillis?.() ?? 0);
     return bTime - aTime;
   });
   return games;

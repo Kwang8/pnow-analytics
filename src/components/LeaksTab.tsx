@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import type { PlayerStats } from '../lib/types';
 import HandCard from './HandCard';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface Props {
   stats: PlayerStats;
 }
+
+const INITIAL_VISIBLE = 2;
 
 const leakLabels: Record<string, { title: string; desc: string }> = {
   'bad-cold-call': {
@@ -49,6 +53,8 @@ const leakLabels: Record<string, { title: string; desc: string }> = {
 };
 
 export default function LeaksTab({ stats }: Props) {
+  const [expanded, setExpanded] = useState(false);
+
   const grouped = new Map<string, typeof stats.leaks>();
   for (const leak of stats.leaks) {
     if (!grouped.has(leak.leakType)) grouped.set(leak.leakType, []);
@@ -74,6 +80,8 @@ export default function LeaksTab({ stats }: Props) {
 
   const topLeak = sortedGroups[0];
   const topLeakInfo = leakLabels[topLeak.type] || { title: topLeak.type, desc: '' };
+  const visibleGroups = expanded ? sortedGroups : sortedGroups.slice(0, INITIAL_VISIBLE);
+  const hiddenCount = sortedGroups.length - INITIAL_VISIBLE;
 
   return (
     <div className="space-y-8">
@@ -85,7 +93,7 @@ export default function LeaksTab({ stats }: Props) {
         </div>
       </div>
 
-      {sortedGroups.map(({ type, hands, totalCost }) => {
+      {visibleGroups.map(({ type, hands, totalCost }) => {
         const info = leakLabels[type] || { title: type, desc: '' };
         return (
           <div key={type}>
@@ -109,6 +117,19 @@ export default function LeaksTab({ stats }: Props) {
           </div>
         );
       })}
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-lg border border-border text-text-muted hover:text-text-secondary hover:bg-bg-hover transition-colors text-sm"
+        >
+          {expanded ? (
+            <>Show less <ChevronUp className="w-4 h-4" /></>
+          ) : (
+            <>Show {hiddenCount} more leak{hiddenCount !== 1 ? 's' : ''} <ChevronDown className="w-4 h-4" /></>
+          )}
+        </button>
+      )}
     </div>
   );
 }

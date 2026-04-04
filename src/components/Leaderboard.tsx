@@ -86,6 +86,9 @@ export default function Leaderboard() {
                             @{entry.username || 'unknown'}
                             {isMe && <span className="text-xs ml-1 text-accent/70">(you)</span>}
                           </div>
+                          {entry.username === 'wang' && (
+                            <div className="text-[10px] text-text-muted italic">running cold, actually plays 50BB/hr above EV</div>
+                          )}
                         </div>
                       </div>
                     </td>

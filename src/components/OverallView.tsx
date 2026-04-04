@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { OverallStats } from '../lib/types';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Cell,
   ScatterChart, Scatter, ReferenceLine, ZAxis, Label, Tooltip,
 } from 'recharts';
+import { findMostSimilarHCL } from '../lib/hclPlayers';
 
 interface Props {
   stats: OverallStats;
@@ -56,6 +57,28 @@ function ScatterTooltip({ active, payload }: any) {
       <div style={{ color: m.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
         P&L: {m.pnl > 0 ? '+' : ''}{m.pnl.toFixed(1)} BB
       </div>
+    </div>
+  );
+}
+
+function HCLMiniAvatar({ player }: { player: import('../lib/hclPlayers').HCLPlayer }) {
+  const [err, setErr] = useState(false);
+  return (
+    <div className="flex items-center gap-2">
+      {err ? (
+        <div className="w-6 h-6 rounded-full bg-bg-hover text-[9px] flex items-center justify-center font-bold text-text-muted shrink-0">
+          {player.nickname.slice(0, 2)}
+        </div>
+      ) : (
+        <img
+          src={player.photo}
+          alt={player.nickname}
+          onError={() => setErr(true)}
+          className="w-6 h-6 rounded-full object-cover shrink-0"
+          referrerPolicy="no-referrer"
+        />
+      )}
+      <span className="text-text-secondary text-xs truncate">{player.nickname}</span>
     </div>
   );
 }
@@ -200,12 +223,14 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
               <th className="text-right p-3 font-mono">VPIP</th>
               <th className="text-right p-3 font-mono">PFR</th>
               <th className="text-right p-3 font-mono">Style</th>
+              <th className="text-left p-3">HCL Twin</th>
               <th className="text-right p-3 font-mono">P&L (BB)</th>
             </tr>
           </thead>
           <tbody>
             {stats.players.map(p => {
               const style = getPlayerStyle(p.vpip, p.pfr);
+              const hcl = findMostSimilarHCL(p.vpip, p.pfr);
               return (
                 <tr
                   key={p.id}
@@ -220,6 +245,9 @@ export default function OverallView({ stats, onSelectPlayer }: Props) {
                     <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: quadrantColors[style.label], background: `${quadrantColors[style.label]}15` }}>
                       {style.label}
                     </span>
+                  </td>
+                  <td className="p-3">
+                    <HCLMiniAvatar player={hcl.player} />
                   </td>
                   <td className={`p-3 text-right font-mono font-bold ${p.pnlBB >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
                     {p.pnlBB >= 0 ? '+' : ''}{p.pnlBB.toFixed(1)}

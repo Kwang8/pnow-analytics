@@ -4,6 +4,7 @@ import StatCard from './StatCard';
 import LeaksTab from './LeaksTab';
 import KeyHandsTab from './KeyHandsTab';
 import PositionTab from './PositionTab';
+import HCLComparison from './HCLComparison';
 
 interface Props {
   stats: PlayerStats;
@@ -65,6 +66,9 @@ export default function Dashboard({ stats, onBack }: Props) {
           </div>
         </div>
       </div>
+
+      {/* HCL Comparison */}
+      <HCLComparison vpip={stats.vpip} pfr={stats.pfr} playerName={stats.playerName} />
 
       {/* Tabs */}
       <div className="flex gap-1 bg-bg-secondary rounded-lg p-1">

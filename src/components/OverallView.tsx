@@ -136,16 +136,16 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, o
       </div>
 
       {/* Player Table */}
-      <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-bg-card border border-border rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-0">
           <thead>
             <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
               <th className="text-left p-3">Player</th>
               <th className="text-right p-3 font-mono">Hands</th>
               <th className="text-right p-3 font-mono">VPIP</th>
               <th className="text-right p-3 font-mono">PFR</th>
-              <th className="text-right p-3 font-mono">Style</th>
-              <th className="text-center p-3 font-mono">Role</th>
+              <th className="text-right p-3 font-mono hidden md:table-cell">Style</th>
+              <th className="text-center p-3 font-mono hidden md:table-cell">Role</th>
               <th className="text-right p-3 font-mono">P&L ($)</th>
               {user && gameId && <th className="text-center p-3 w-20"></th>}
             </tr>
@@ -163,12 +163,12 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, o
                   <td className="p-3 text-right font-mono text-text-secondary">{p.handsPlayed}</td>
                   <td className="p-3 text-right font-mono text-text-secondary">{p.vpip.toFixed(1)}%</td>
                   <td className="p-3 text-right font-mono text-text-secondary">{p.pfr.toFixed(1)}%</td>
-                  <td className="p-3 text-right">
+                  <td className="p-3 text-right hidden md:table-cell">
                     <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: quadrantColors[style.label], background: `${quadrantColors[style.label]}15` }}>
                       {style.label}
                     </span>
                   </td>
-                  <td className="p-3 text-center">
+                  <td className="p-3 text-center hidden md:table-cell">
                     {p.tableRole && (
                       <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ color: ROLE_BADGE[p.tableRole].color, background: `${ROLE_BADGE[p.tableRole].color}15` }}>
                         {ROLE_BADGE[p.tableRole].label}

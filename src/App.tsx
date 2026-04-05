@@ -136,10 +136,6 @@ export default function App() {
     }
   }, [user]);
 
-  const triggerUpload = useCallback(() => {
-    setUploadError(null);
-    fileInputRef.current?.click();
-  }, []);
 
   const loadClaims = useCallback(async (gameId: string) => {
     if (!user) return;

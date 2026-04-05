@@ -13,6 +13,7 @@ import MyStats from './components/MyStats';
 import Leaderboard from './components/Leaderboard';
 import AuthButton from './components/AuthButton';
 import AddFriend from './components/AddFriend';
+import NewGameModal from './components/NewGameModal';
 import { Share2, Check, BarChart3, Trophy, UserPlus, Plus, Loader2, Menu, X } from 'lucide-react';
 
 type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard';
@@ -33,6 +34,7 @@ export default function App() {
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showNewGame, setShowNewGame] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // Map of gameId -> (pokerNowId -> uid | null)
   const [claimedMap, setClaimedMap] = useState<Map<string, Map<string, string | null>>>(new Map());
@@ -232,7 +234,7 @@ export default function App() {
       {/* New Game button */}
       <div className="p-3 space-y-2">
         <button
-          onClick={triggerUpload}
+          onClick={() => setShowNewGame(true)}
           className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/85 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -302,6 +304,12 @@ export default function App() {
       {fileInput}
       {showAddFriend && (
         <AddFriend onDone={() => { setShowAddFriend(false); setRefreshKey(k => k + 1); }} />
+      )}
+      {showNewGame && (
+        <NewGameModal
+          onFileSelected={(file) => { setShowNewGame(false); handleFileSelected(file); }}
+          onClose={() => setShowNewGame(false)}
+        />
       )}
 
       {/* Header */}

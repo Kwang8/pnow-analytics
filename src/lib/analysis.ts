@@ -49,6 +49,7 @@ function getStreets(events: { payload: EventPayload }[]): Map<number, Street> {
 function getPotAtStreetStart(events: { payload: EventPayload }[], targetStreet: Street): number {
   let pot = 0;
   let currentStreet: Street = 'preflop';
+  const roundCommitments = new Map<number, number>();
 
   for (const e of events) {
     const p = e.payload;
@@ -57,12 +58,17 @@ function getPotAtStreetStart(events: { payload: EventPayload }[], targetStreet: 
       if (turn === 1) currentStreet = 'flop';
       else if (turn === 2) currentStreet = 'turn';
       else if (turn === 3) currentStreet = 'river';
+      // Flush round commitments to pot
+      for (const v of roundCommitments.values()) pot += v;
+      roundCommitments.clear();
       if (currentStreet === targetStreet) return pot;
     }
-    if ('value' in p && ([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
-      pot += (p as { value: number }).value;
+    if ('seat' in p && 'value' in p && ([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
+      const seat = (p as { seat: number }).seat;
+      roundCommitments.set(seat, Math.max(roundCommitments.get(seat) ?? 0, (p as { value: number }).value));
     }
   }
+  for (const v of roundCommitments.values()) pot += v;
   return pot;
 }
 
@@ -109,12 +115,21 @@ function buildActions(hand: Hand, heroSeat: number): ActionEntry[] {
 function getNetResult(hand: Hand, playerSeat: number): number {
   let invested = 0;
   let returned = 0;
+  let roundCommitment = 0;
 
   for (const e of hand.events) {
     const p = e.payload;
+    // Flush round commitment when a new street begins
+    if (p.type === EVT.COMMUNITY) {
+      invested += roundCommitment;
+      roundCommitment = 0;
+      continue;
+    }
     if ('seat' in p && (p as { seat: number }).seat === playerSeat) {
       if (([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
-        invested += (p as { value: number }).value;
+        // CALL/BET_RAISE values are cumulative per round (include prior posts),
+        // so take the max to avoid double-counting blind posts
+        roundCommitment = Math.max(roundCommitment, (p as { value: number }).value);
       }
       if (p.type === EVT.POT_WON) {
         returned += (p as { value: number }).value;
@@ -124,6 +139,7 @@ function getNetResult(hand: Hand, playerSeat: number): number {
       }
     }
   }
+  invested += roundCommitment;
   return returned - invested;
 }
 

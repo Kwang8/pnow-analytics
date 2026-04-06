@@ -412,7 +412,7 @@ export default function App() {
             )}
 
             {contentView === 'player' && playerStats && (
-              <Dashboard stats={playerStats} onBack={handleBackToOverall} isSharedView={isSharedView} />
+              <Dashboard stats={playerStats} onBack={handleBackToOverall} isSharedView={isSharedView} data={data} />
             )}
 
             {contentView === 'mystats' && <MyStats />}

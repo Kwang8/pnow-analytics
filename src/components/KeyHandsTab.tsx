@@ -3,9 +3,10 @@ import HandCard from './HandCard';
 
 interface Props {
   stats: PlayerStats;
+  onReplay?: (handNumber: string) => void;
 }
 
-export default function KeyHandsTab({ stats }: Props) {
+export default function KeyHandsTab({ stats, onReplay }: Props) {
   return (
     <div className="space-y-8">
       <div>
@@ -15,7 +16,7 @@ export default function KeyHandsTab({ stats }: Props) {
         </h3>
         <div className="grid gap-3 md:grid-cols-2">
           {stats.biggestLosers.map((h) => (
-            <HandCard key={h.handNumber} hand={h} />
+            <HandCard key={h.handNumber} hand={h} onReplay={onReplay} />
           ))}
         </div>
       </div>
@@ -27,7 +28,7 @@ export default function KeyHandsTab({ stats }: Props) {
         </h3>
         <div className="grid gap-3 md:grid-cols-2">
           {stats.biggestWinners.map((h) => (
-            <HandCard key={h.handNumber} hand={h} />
+            <HandCard key={h.handNumber} hand={h} onReplay={onReplay} />
           ))}
         </div>
       </div>

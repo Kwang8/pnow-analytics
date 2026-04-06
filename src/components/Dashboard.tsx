@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { PlayerStats, StatHealth } from '../lib/types';
 import StatCard from './StatCard';
 import LeaksTab from './LeaksTab';
@@ -6,11 +6,17 @@ import KeyHandsTab from './KeyHandsTab';
 import PositionTab from './PositionTab';
 import HCLComparison from './HCLComparison';
 import PreflopRangesTab from './PreflopRangesTab';
+import BluffTab from './BluffTab';
+import TiltTab from './TiltTab';
+import HandReplayer from './HandReplayer';
+import { generateSessionDigest } from '../lib/digest';
+import type { PokerNowExport, Hand } from '../lib/types';
 
 interface Props {
   stats: PlayerStats;
   onBack: () => void;
   isSharedView?: boolean;
+  data?: PokerNowExport | null;
 }
 
 function getHealth(stat: string, value: number): StatHealth {
@@ -35,18 +41,27 @@ function getHealth(stat: string, value: number): StatHealth {
   return 'good';
 }
 
-const allTabs = ['Stats', 'Leaks', 'Key Hands', 'Position', 'Preflop Ranges'] as const;
+const allTabs = ['Stats', 'Leaks', 'Bluffs', 'Tilt', 'Key Hands', 'Position', 'Preflop Ranges'] as const;
 const sharedTabs = ['Stats', 'Position', 'Preflop Ranges'] as const;
 
-export default function Dashboard({ stats, onBack, isSharedView }: Props) {
+export default function Dashboard({ stats, onBack, isSharedView, data }: Props) {
   const tabs = isSharedView ? sharedTabs : allTabs;
   const [activeTab, setActiveTab] = useState<typeof allTabs[number]>('Stats');
+  const [replayHand, setReplayHand] = useState<Hand | null>(null);
+
+  const handleReplayHand = useCallback((handNumber: string) => {
+    if (!data) return;
+    const hand = data.hands.find(h => h.number === handNumber);
+    if (hand) setReplayHand(hand);
+  }, [data]);
 
   const pnlDollars = stats.totalPnl / 100;
   const pnlColor = pnlDollars >= 0 ? 'text-stat-green' : 'text-stat-red';
   const pnlSign = pnlDollars >= 0 ? '+' : '';
 
   const afDisplay = (val: number) => val === Infinity ? '∞' : val.toFixed(1);
+
+  const digest = useMemo(() => generateSessionDigest(stats), [stats]);
 
   return (
     <div className="space-y-6">
@@ -74,6 +89,19 @@ export default function Dashboard({ stats, onBack, isSharedView }: Props) {
 
       {/* HCL Comparison */}
       <HCLComparison vpip={stats.vpip} pfr={stats.pfr} playerName={stats.playerName} />
+
+      {/* Session Digest */}
+      {digest.length > 0 && (
+        <div className="bg-bg-card border border-border rounded-lg p-4 space-y-2">
+          <div className="text-text-muted text-xs uppercase tracking-wider font-semibold mb-1">Session Recap</div>
+          {digest.map((item, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm text-text-secondary">
+              <span className="shrink-0">{item.icon}</span>
+              <span>{item.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-bg-secondary rounded-lg p-1">
@@ -176,10 +204,21 @@ export default function Dashboard({ stats, onBack, isSharedView }: Props) {
         </div>
       )}
 
-      {activeTab === 'Leaks' && <LeaksTab stats={stats} />}
-      {activeTab === 'Key Hands' && <KeyHandsTab stats={stats} />}
+      {activeTab === 'Leaks' && <LeaksTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
+      {activeTab === 'Bluffs' && <BluffTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
+      {activeTab === 'Tilt' && <TiltTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
+      {activeTab === 'Key Hands' && <KeyHandsTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
       {activeTab === 'Position' && <PositionTab stats={stats} />}
       {activeTab === 'Preflop Ranges' && <PreflopRangesTab stats={stats} />}
+
+      {/* Hand Replayer Modal */}
+      {replayHand && (
+        <HandReplayer
+          hand={replayHand}
+          heroPlayerId={stats.playerId}
+          onClose={() => setReplayHand(null)}
+        />
+      )}
     </div>
   );
 }

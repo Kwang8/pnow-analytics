@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface Props {
   stats: PlayerStats;
+  onReplay?: (handNumber: string) => void;
 }
 
 const INITIAL_VISIBLE = 2;
@@ -52,7 +53,7 @@ const leakLabels: Record<string, { title: string; desc: string }> = {
   },
 };
 
-export default function LeaksTab({ stats }: Props) {
+export default function LeaksTab({ stats, onReplay }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const grouped = new Map<string, typeof stats.leaks>();
@@ -108,7 +109,7 @@ export default function LeaksTab({ stats }: Props) {
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {hands.slice(0, 8).map((h) => (
-                <HandCard key={h.handNumber} hand={h} />
+                <HandCard key={h.handNumber} hand={h} onReplay={onReplay} />
               ))}
             </div>
             {hands.length > 8 && (

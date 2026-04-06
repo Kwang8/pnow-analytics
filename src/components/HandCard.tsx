@@ -1,4 +1,5 @@
 import type { HandResult } from '../lib/types';
+import { Play } from 'lucide-react';
 
 function CardDisplay({ card }: { card: string }) {
   const suit = card[card.length - 1];
@@ -39,9 +40,10 @@ const actionColors: Record<string, string> = {
 interface Props {
   hand: HandResult;
   compact?: boolean;
+  onReplay?: (handNumber: string) => void;
 }
 
-export default function HandCard({ hand, compact }: Props) {
+export default function HandCard({ hand, compact, onReplay }: Props) {
   const resultColor = hand.netResultBB > 0 ? 'text-stat-green' : hand.netResultBB < 0 ? 'text-stat-red' : 'text-text-muted';
   const resultSign = hand.netResultBB > 0 ? '+' : '';
 
@@ -61,7 +63,18 @@ export default function HandCard({ hand, compact }: Props) {
     return (
       <div className="bg-bg-card border border-border rounded-lg p-3 hover:bg-bg-hover transition-colors">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-text-muted text-xs font-mono">#{hand.handNumber}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-text-muted text-xs font-mono">#{hand.handNumber}</span>
+            {onReplay && (
+              <button
+                onClick={() => onReplay(hand.handNumber)}
+                className="text-text-muted hover:text-accent p-0.5 transition-colors"
+                title="Replay"
+              >
+                <Play className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <span className={`font-mono text-sm font-bold ${resultColor}`}>
             {resultSign}{hand.netResultBB.toFixed(1)} BB
           </span>
@@ -92,6 +105,15 @@ export default function HandCard({ hand, compact }: Props) {
           <span className="text-text-secondary text-xs">
             {hand.position} · {hand.numPlayers}p · {hand.stackDepth.toFixed(0)}bb
           </span>
+          {onReplay && (
+            <button
+              onClick={() => onReplay(hand.handNumber)}
+              className="text-text-muted hover:text-accent p-0.5 transition-colors"
+              title="Replay hand"
+            >
+              <Play className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
         <span className={`font-mono text-lg font-bold ${resultColor}`}>
           {resultSign}{hand.netResultBB.toFixed(1)} BB

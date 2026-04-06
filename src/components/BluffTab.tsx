@@ -3,7 +3,6 @@ import type { PlayerStats, HandResult, Street } from '../lib/types';
 import { isBelowMiddlePair } from '../lib/handEval';
 import HandCard from './HandCard';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface Props {
   stats: PlayerStats;
@@ -89,7 +88,6 @@ export default function BluffTab({ stats, onReplay }: Props) {
   }
 
   const displayList = showFailed ? failed : successful;
-  const displayLabel = showFailed ? 'Failed Bluffs' : 'Successful Bluffs';
 
   return (
     <div className="space-y-6">

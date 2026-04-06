@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { Hand, EventPayload } from '../lib/types';
+import type { Hand } from '../lib/types';
 import { EVT } from '../lib/types';
 import CardDisplay from './CardDisplay';
 import { X, SkipBack, SkipForward, Play, Pause } from 'lucide-react';
@@ -133,7 +133,7 @@ function buildSnapshots(hand: Hand): Snapshot[] {
     const player = players.find(pl => pl.seat === seat);
     if (!player) continue;
 
-    const investTypes = [EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE];
+    const investTypes: number[] = [EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE];
 
     if (investTypes.includes(p.type)) {
       // value is cumulative for the round — actual new chips = value - roundBet

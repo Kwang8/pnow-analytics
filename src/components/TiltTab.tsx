@@ -119,7 +119,7 @@ export default function TiltTab({ stats, onReplay }: Props) {
                 <Tooltip
                   contentStyle={{ background: '#141a23', border: '1px solid #1e293b', borderRadius: 8 }}
                   labelFormatter={v => `Hand ${v}`}
-                  formatter={(v: number) => [`${v.toFixed(0)}%`, 'VPIP']}
+                  formatter={(v) => [`${Number(v).toFixed(0)}%`, 'VPIP']}
                 />
                 <Area type="monotone" dataKey="vpip" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} strokeWidth={2} />
               </AreaChart>
@@ -157,7 +157,7 @@ export default function TiltTab({ stats, onReplay }: Props) {
             <Tooltip
               contentStyle={{ background: '#141a23', border: '1px solid #1e293b', borderRadius: 8 }}
               labelFormatter={v => `Hand ${v}`}
-              formatter={(v: number) => [`${v.toFixed(0)}%`, 'VPIP']}
+              formatter={(v) => [`${Number(v).toFixed(0)}%`, 'VPIP']}
             />
             {/* Tilt zone highlights */}
             {tiltWindows.map((w, i) => (

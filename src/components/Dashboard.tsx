@@ -5,7 +5,6 @@ import LeaksTab from './LeaksTab';
 import KeyHandsTab from './KeyHandsTab';
 import PositionTab from './PositionTab';
 import HCLComparison from './HCLComparison';
-import PreflopRangesTab from './PreflopRangesTab';
 import BluffTab from './BluffTab';
 import TiltTab from './TiltTab';
 import HandReplayer from './HandReplayer';
@@ -41,8 +40,8 @@ function getHealth(stat: string, value: number): StatHealth {
   return 'good';
 }
 
-const allTabs = ['Stats', 'Leaks', 'Bluffs', 'Tilt', 'Key Hands', 'Position', 'Preflop Ranges'] as const;
-const sharedTabs = ['Stats', 'Position', 'Preflop Ranges'] as const;
+const allTabs = ['Stats', 'Leaks', 'Bluffs', 'Tilt', 'Key Hands', 'Position'] as const;
+const sharedTabs = ['Stats', 'Position'] as const;
 
 export default function Dashboard({ stats, onBack, isSharedView, data }: Props) {
   const tabs = isSharedView ? sharedTabs : allTabs;
@@ -209,7 +208,6 @@ export default function Dashboard({ stats, onBack, isSharedView, data }: Props) 
       {activeTab === 'Tilt' && <TiltTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
       {activeTab === 'Key Hands' && <KeyHandsTab stats={stats} onReplay={data ? handleReplayHand : undefined} />}
       {activeTab === 'Position' && <PositionTab stats={stats} />}
-      {activeTab === 'Preflop Ranges' && <PreflopRangesTab stats={stats} />}
 
       {/* Hand Replayer Modal */}
       {replayHand && (

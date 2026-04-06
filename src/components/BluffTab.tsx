@@ -25,7 +25,7 @@ function getLastHeroBetStreet(hand: HandResult): Street | null {
 
 function isBluffCandidate(hand: HandResult): hand is HandResult & { holeCards: [string, string] } {
   return (
-    hand.holeCards !== null &&
+    !!hand.holeCards &&
     hand.board.length >= 3 &&
     isBelowMiddlePair(hand.holeCards, hand.board)
   );

@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import type { PlayerStats, HandResult, Street } from '../lib/types';
 import { isBelowMiddlePair } from '../lib/handEval';
 import HandCard from './HandCard';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface Props {
   stats: PlayerStats;
@@ -91,69 +90,63 @@ export default function BluffTab({ stats, onReplay }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="text-text-muted text-xs uppercase tracking-wider">Bluffs</div>
-          <div className="font-mono text-2xl font-bold text-text-primary">{total}</div>
-          <div className="text-text-muted text-xs">{successful.length} won, {failed.length} lost</div>
-        </div>
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="text-text-muted text-xs uppercase tracking-wider">Success Rate</div>
-          <div className={`font-mono text-2xl font-bold ${successRate >= 50 ? 'text-stat-green' : 'text-stat-red'}`}>
-            {successRate.toFixed(0)}%
+      {/* Summary */}
+      <div className="bg-bg-card border border-border rounded-lg p-4">
+        <div className="grid grid-cols-4 gap-4 text-center">
+          <div>
+            <div className="text-text-muted text-[10px] uppercase tracking-wider">Bluffs</div>
+            <div className="font-mono text-xl font-bold text-text-primary">{total}</div>
+            <div className="text-text-muted text-[10px]">{successful.length}W {failed.length}L</div>
           </div>
-        </div>
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="text-text-muted text-xs uppercase tracking-wider">Bluff P&L</div>
-          <div className={`font-mono text-2xl font-bold ${bluffPnlCents >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-            {bluffPnlBB >= 0 ? '+' : ''}{bluffPnlBB.toFixed(1)} BB
+          <div>
+            <div className="text-text-muted text-[10px] uppercase tracking-wider">Success</div>
+            <div className={`font-mono text-xl font-bold ${successRate >= 50 ? 'text-stat-green' : 'text-stat-red'}`}>
+              {successRate.toFixed(0)}%
+            </div>
           </div>
-          <div className="text-text-muted text-xs">
-            {bluffPnlCents >= 0 ? '+' : ''}${(bluffPnlCents / 100).toFixed(2)}
+          <div>
+            <div className="text-text-muted text-[10px] uppercase tracking-wider">P&L</div>
+            <div className={`font-mono text-xl font-bold ${bluffPnlCents >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+              {bluffPnlBB >= 0 ? '+' : ''}{bluffPnlBB.toFixed(1)}bb
+            </div>
+            <div className="text-text-muted text-[10px]">
+              {bluffPnlCents >= 0 ? '+' : ''}${(bluffPnlCents / 100).toFixed(2)}
+            </div>
           </div>
-        </div>
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="text-text-muted text-xs uppercase tracking-wider">Avg Bluff Size</div>
-          <div className="font-mono text-2xl font-bold text-text-primary">
-            {(() => {
-              const sizes: number[] = [];
-              for (const h of [...successful, ...failed]) {
-                for (const a of h.actions) {
-                  if (a.isHero && (a.action === 'raise' || a.action === 'bet') && a.amount) {
-                    sizes.push(a.amount / h.bigBlind);
+          <div>
+            <div className="text-text-muted text-[10px] uppercase tracking-wider">Avg Size</div>
+            <div className="font-mono text-xl font-bold text-text-primary">
+              {(() => {
+                const sizes: number[] = [];
+                for (const h of [...successful, ...failed]) {
+                  for (const a of h.actions) {
+                    if (a.isHero && (a.action === 'raise' || a.action === 'bet') && a.amount) {
+                      sizes.push(a.amount / h.bigBlind);
+                    }
                   }
                 }
-              }
-              if (sizes.length === 0) return 'N/A';
-              return `${(sizes.reduce((a, b) => a + b, 0) / sizes.length).toFixed(1)} BB`;
-            })()}
+                if (sizes.length === 0) return 'N/A';
+                return `${(sizes.reduce((a, b) => a + b, 0) / sizes.length).toFixed(1)}bb`;
+              })()}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Bar Chart by Street */}
-      {chartData.length > 0 && (
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <h3 className="text-text-primary font-semibold mb-3">Bluffs by Street</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={chartData} barGap={4}>
-              <XAxis dataKey="street" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
-              <Tooltip
-                contentStyle={{ background: '#141a23', border: '1px solid #1e293b', borderRadius: 8 }}
-                labelStyle={{ color: '#e2e8f0' }}
-              />
-              <Bar dataKey="won" name="Won" stackId="a" radius={[0, 0, 0, 0]}>
-                {chartData.map((_, i) => <Cell key={i} fill="#22c55e" />)}
-              </Bar>
-              <Bar dataKey="lost" name="Lost" stackId="a" radius={[4, 4, 0, 0]}>
-                {chartData.map((_, i) => <Cell key={i} fill="#ef4444" />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+        {/* Inline street breakdown — only show if multiple streets */}
+        {chartData.length > 1 && (
+          <div className="mt-4 pt-3 border-t border-border flex gap-4 justify-center">
+            {chartData.map(d => (
+              <div key={d.street} className="text-center">
+                <div className="text-text-muted text-[10px] uppercase">{d.street}</div>
+                <div className="flex items-center gap-1.5 text-xs font-mono">
+                  <span className="text-stat-green">{d.won}W</span>
+                  <span className="text-stat-red">{d.lost}L</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Toggle + Hand List */}
       <div>

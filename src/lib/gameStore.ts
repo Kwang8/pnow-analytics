@@ -4,7 +4,7 @@ import {
 } from 'firebase/firestore';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import { db } from './firebase';
-import { analyzeOverall } from './analysis';
+import { analyzeOverall, analyzePlayer } from './analysis';
 import type { PokerNowExport, OverallStats } from './types';
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -45,6 +45,24 @@ export interface GamePlayerDoc {
   bigBlind: number;
   gameDate: string;
   uploadedBy: string;
+  /** EV-adjusted P&L in cents. Equals `pnl` when no all-in runouts
+   *  occurred in the session. Older documents may not have this field;
+   *  readers should fall back to `pnl`. */
+  evPnl?: number;
+}
+
+/** Compute per-player EV-adjusted P&L (cents) from a raw export, keyed
+ *  by pokerNowId. Runs `analyzePlayer` once per player and sums each
+ *  player's hand-level `evNet`. Called at save/refresh time so the
+ *  number can be denormalized onto gamePlayers docs. */
+function computeEvPnlMap(data: PokerNowExport, overall: OverallStats): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const p of overall.players) {
+    const analysis = analyzePlayer(data, p.id);
+    const evSum = analysis.handResults.reduce((s, h) => s + h.evNet, 0);
+    map.set(p.id, evSum);
+  }
+  return map;
 }
 
 // ─── Save Game ──────────────────────────────────────────────────────────
@@ -86,6 +104,9 @@ export async function saveGame(
     rawData,
   });
 
+  // Compute per-player EV once up front; reuses the raw parse we already have.
+  const evPnlMap = computeEvPnlMap(data, overall);
+
   // Write flat gamePlayers docs for aggregation queries
   const batch = writeBatch(db);
   for (const p of overall.players) {
@@ -105,6 +126,7 @@ export async function saveGame(
         ? new Date(data.hands[0].startedAt).toISOString()
         : data.generatedAt,
       uploadedBy: uid,
+      evPnl: evPnlMap.get(p.id) ?? p.pnl,
     } satisfies GamePlayerDoc);
   }
   batch.commit();
@@ -181,6 +203,9 @@ export async function refreshGame(gameId: string): Promise<void> {
     bigBlind: overall.bigBlind,
   });
 
+  // Recompute EV so manually-refreshed games backfill the field.
+  const evPnlMap = computeEvPnlMap(data, overall);
+
   // Batch-update gamePlayers docs (preserve existing uid)
   const batch = writeBatch(db);
   for (const p of overall.players) {
@@ -194,6 +219,7 @@ export async function refreshGame(gameId: string): Promise<void> {
       handsPlayed: p.handsPlayed,
       bigBlind: overall.bigBlind,
       gameDate,
+      evPnl: evPnlMap.get(p.id) ?? p.pnl,
     });
   }
   await batch.commit();

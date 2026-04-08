@@ -7,6 +7,7 @@ import {
   getMyGroups, createGroup, deleteGroup, updateMyAggregate,
   type GroupDoc,
 } from './lib/gameStore';
+import { getCachedPlayerAnalysis, invalidateGameCache } from './lib/cache';
 import { useAuth } from './lib/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import UsernameSetup from './components/UsernameSetup';
@@ -120,12 +121,18 @@ export default function App() {
 
   const playerStats = useMemo<PlayerStats | null>(() => {
     if (!selectedPlayerId) return null;
-    if (data) return analyzePlayer(data, selectedPlayerId);
+    if (data) {
+      // Reuse cache when we have a saved gameId; fall back to direct call
+      // for freshly-uploaded games that haven't been persisted yet.
+      return currentGameId
+        ? getCachedPlayerAnalysis(currentGameId, data, selectedPlayerId)
+        : analyzePlayer(data, selectedPlayerId);
+    }
     if (isSharedView && sharedPlayerMap) {
       return sharedPlayerMap.get(selectedPlayerId) ?? null;
     }
     return null;
-  }, [data, selectedPlayerId, isSharedView, sharedPlayerMap]);
+  }, [data, currentGameId, selectedPlayerId, isSharedView, sharedPlayerMap]);
 
   const handleFileSelected = useCallback(async (file: File) => {
     setUploadError(null);
@@ -210,6 +217,8 @@ export default function App() {
     setRefreshing(true);
     try {
       await refreshGame(currentGameId);
+      // Drop stale cached analysis/raw for this game — it's been recomputed on the server.
+      invalidateGameCache(currentGameId);
       setRefreshKey(k => k + 1);
       if (user) {
         updateMyAggregate(user.uid).catch(err => console.error('Aggregate update failed:', err));

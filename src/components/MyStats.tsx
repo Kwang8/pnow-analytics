@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import {
-  getMyGamePlayerDocs, getGameRawData, getAllGamePlayers, getUserProfiles,
+  getMyGamePlayerDocs, getAllGamePlayers, getUserProfiles,
   setProfilePublic, updateMyAggregate,
   type GamePlayerDoc,
 } from '../lib/gameStore';
-import { analyzePlayer, computeOpponentStats, type OpponentStat } from '../lib/analysis';
+import { getCachedGameRawData, getCachedPlayerAnalysis } from '../lib/cache';
+import { computeOpponentStats, type OpponentStat } from '../lib/analysis';
 import type { HandResult, LeakHand } from '../lib/types';
 import PreflopRangesTab from './PreflopRangesTab';
 import LeaksTab from './LeaksTab';
@@ -37,8 +38,6 @@ export default function MyStats() {
   const [leaks, setLeaks] = useState<LeakHand[]>([]);
   const [handsLoading, setHandsLoading] = useState(false);
   const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
-  // Per-session cumulative EV totals in cents, keyed by gameId.
-  const [sessionEvByGame, setSessionEvByGame] = useState<Map<string, number>>(new Map());
   const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions'>('Rivals');
   const [togglingPublic, setTogglingPublic] = useState(false);
 
@@ -66,45 +65,40 @@ export default function MyStats() {
     });
   }, [user]);
 
-  // Background load hand-level data for preflop chart, leaks & opponent stats
+  // Background load hand-level data for preflop chart, leaks & opponent stats.
+  // Uses session-level in-memory caches so repeat mounts are near-instant.
   useEffect(() => {
     if (docs.length === 0) return;
     setHandsLoading(true);
 
     const gameIds = docs.map(d => d.gameId);
 
-    // Load raw data + gamePlayers claims in parallel
+    // Load raw data (cached) + gamePlayers claims in parallel
     Promise.all([
       Promise.all(
         docs.map(async (doc) => {
-          const raw = await getGameRawData(doc.gameId);
+          const raw = await getCachedGameRawData(doc.gameId);
           if (!raw) return null;
           return { raw, pokerNowId: doc.pokerNowId, gameId: doc.gameId };
         })
       ),
       getAllGamePlayers(gameIds),
     ]).then(async ([rawResults, allGpDocs]) => {
-      // Analyze hands
+      // Analyze hands (cached)
       const allHands: HandResult[] = [];
       const allLeaks: LeakHand[] = [];
       const perGameOpponents: { gameId: string; stats: OpponentStat[] }[] = [];
-      const evByGame = new Map<string, number>();
 
       for (const entry of rawResults) {
         if (!entry) continue;
-        const analysis = analyzePlayer(entry.raw, entry.pokerNowId);
+        const analysis = getCachedPlayerAnalysis(entry.gameId, entry.raw, entry.pokerNowId);
         allHands.push(...analysis.handResults);
         allLeaks.push(...analysis.leaks);
         perGameOpponents.push({ gameId: entry.gameId, stats: computeOpponentStats(entry.raw, entry.pokerNowId) });
-
-        // Sum per-hand EV-adjusted net for this session (cents).
-        const evSum = analysis.handResults.reduce((s, h) => s + h.evNet, 0);
-        evByGame.set(entry.gameId, evSum);
       }
 
       setHandResults(allHands);
       setLeaks(allLeaks);
-      setSessionEvByGame(evByGame);
 
       // Build claim map: (gameId, pokerNowId) → uid
       const claimMap = new Map<string, string>();
@@ -174,15 +168,16 @@ export default function MyStats() {
     return points;
   }, [sorted]);
 
-  // Cumulative actual vs EV-adjusted by session. Only meaningful once
-  // hand-level analysis has populated sessionEvByGame.
+  // Cumulative actual vs EV-adjusted by session. Reads `evPnl` straight
+  // off the denormalized gamePlayers docs, so the chart renders
+  // immediately without waiting on hand-level analysis.
   const evChart = useMemo(() => {
-    if (sessionEvByGame.size === 0) return null;
+    if (sorted.length === 0) return null;
     let cumActual = 0;
     let cumEv = 0;
     const points = [{ label: 'Start', actual: 0, ev: 0 }];
     sorted.forEach((d, i) => {
-      const evCents = sessionEvByGame.get(d.gameId) ?? d.pnl;
+      const evCents = d.evPnl ?? d.pnl;
       cumActual += d.pnl / 100;
       cumEv += evCents / 100;
       const date = d.gameDate
@@ -195,9 +190,11 @@ export default function MyStats() {
         ev: Math.round(cumEv * 100) / 100,
       });
     });
-    const hasAllInEvents = handResults.some(h => h.hadAllInShowdown);
+    // "Has events" = at least one session has a non-trivial EV adjustment.
+    // Old docs without evPnl get pnl by fallback, so they contribute 0 delta.
+    const hasAllInEvents = sorted.some(d => d.evPnl !== undefined && d.evPnl !== d.pnl);
     return { points, hasAllInEvents };
-  }, [sorted, sessionEvByGame, handResults]);
+  }, [sorted]);
 
   const totalSessions = docs.length;
   const totalHands = docs.reduce((s, d) => s + d.handsPlayed, 0);
@@ -287,12 +284,11 @@ export default function MyStats() {
           </div>
 
           {/* EV Chart — actual vs expected across sessions.
-              Rendered unconditionally so its footprint is reserved from
-              first paint; the component handles the loading skeleton. */}
+              Data comes straight off the denormalized `evPnl` on
+              gamePlayers docs, so it paints on first load. */}
           <EvChart
             points={evChart?.points ?? [{ label: 'Start', actual: 0, ev: 0 }]}
             hasAllInEvents={evChart?.hasAllInEvents ?? false}
-            loading={handsLoading}
             subtitle="Cumulative actual vs expected across all your sessions"
           />
 

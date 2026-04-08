@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Folder, Loader2, TrendingUp } from 'lucide-react';
 import {
-  getAllGamePlayers, getGameRawData, getUserProfiles,
+  getAllGamePlayers, getUserProfiles,
   type GroupDoc,
 } from '../lib/gameStore';
-import { analyzePlayer } from '../lib/analysis';
-import type { PokerNowExport } from '../lib/types';
 import { useAuth } from '../lib/AuthContext';
 
 interface Props {
@@ -47,22 +45,10 @@ export default function GroupView({ group }: Props) {
 
     (async () => {
       try {
-        // Load gamePlayer docs (for the claim map + the set of poker-now IDs per game)
-        // and the raw hand history in parallel.
-        const [allGps, rawResults] = await Promise.all([
-          getAllGamePlayers(gameIds),
-          Promise.all(
-            gameIds.map(async (id) => ({ id, raw: await getGameRawData(id) as PokerNowExport | null })),
-          ),
-        ]);
-
-        // Build game → [gamePlayer docs] map.
-        const gpsByGame = new Map<string, typeof allGps>();
-        for (const gp of allGps) {
-          const list = gpsByGame.get(gp.gameId) ?? [];
-          list.push(gp);
-          gpsByGame.set(gp.gameId, list);
-        }
+        // A single batched read of gamePlayers docs is enough now that
+        // `evPnl` is denormalized onto each doc. No raw-data load, no
+        // per-player `analyzePlayer` — just aggregation.
+        const allGps = await getAllGamePlayers(gameIds);
 
         // Aggregate per-player stats across all games.
         // Identity rule: if a poker-now player is claimed to a uid, merge by that uid;
@@ -77,35 +63,28 @@ export default function GroupView({ group }: Props) {
           handsPlayed: number;
         }>();
 
-        for (const { id: gameId, raw } of rawResults) {
-          if (!raw) continue;
-          const gps = gpsByGame.get(gameId) ?? [];
-          for (const gp of gps) {
-            // Run the hero-perspective analyzer for this player in this game
-            // so we get per-hand EV.
-            const analysis = analyzePlayer(raw, gp.pokerNowId);
-            const actual = analysis.handResults.reduce((s, h) => s + h.netResult, 0);
-            const ev = analysis.handResults.reduce((s, h) => s + h.evNet, 0);
+        for (const gp of allGps) {
+          const actual = gp.pnl;
+          const ev = gp.evPnl ?? gp.pnl;       // older docs fall back to actual
 
-            const key = gp.uid ? `uid:${gp.uid}` : `name:${gp.playerName.toLowerCase()}`;
-            const prev = agg.get(key);
-            if (prev) {
-              prev.actualCents += actual;
-              prev.evCents += ev;
-              prev.sessions += 1;
-              prev.handsPlayed += gp.handsPlayed;
-              if (gp.uid && !prev.uid) prev.uid = gp.uid;
-            } else {
-              agg.set(key, {
-                displayName: gp.playerName,
-                username: '',
-                uid: gp.uid,
-                actualCents: actual,
-                evCents: ev,
-                sessions: 1,
-                handsPlayed: gp.handsPlayed,
-              });
-            }
+          const key = gp.uid ? `uid:${gp.uid}` : `name:${gp.playerName.toLowerCase()}`;
+          const prev = agg.get(key);
+          if (prev) {
+            prev.actualCents += actual;
+            prev.evCents += ev;
+            prev.sessions += 1;
+            prev.handsPlayed += gp.handsPlayed;
+            if (gp.uid && !prev.uid) prev.uid = gp.uid;
+          } else {
+            agg.set(key, {
+              displayName: gp.playerName,
+              username: '',
+              uid: gp.uid,
+              actualCents: actual,
+              evCents: ev,
+              sessions: 1,
+              handsPlayed: gp.handsPlayed,
+            });
           }
         }
 

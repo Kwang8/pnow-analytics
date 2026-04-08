@@ -2,7 +2,7 @@ import {
   type PokerNowExport, type Hand, type PlayerStats,
   type Position, type Street, type StreetAggression, type PositionStat,
   type HandResult, type ActionEntry, type LeakHand, type OverallStats,
-  type EventPayload, EVT,
+  type EventPayload, type AllInShowdown, EVT,
 } from './types';
 import { equity } from './equity';
 
@@ -240,6 +240,7 @@ function getBoard(hand: Hand): string[] {
 interface HeroEvResult {
   evNet: number;           // EV-adjusted net in cents
   hadAllInShowdown: boolean;
+  allInShowdown?: AllInShowdown;
 }
 
 // Events that represent a real chip-committing or fold decision.
@@ -365,7 +366,20 @@ function computeHeroEv(hand: Hand, heroSeat: number, actualNet: number): HeroEvR
   // evNet replaces the lucky/unlucky POT_WON outcome with the expected
   // share, leaving everything else about the hand unchanged.
   const evNet = Math.round(actualNet - heroPotWon + heroEquity * totalPot);
-  return { evNet, hadAllInShowdown: true };
+
+  const snapshot: AllInShowdown = {
+    boardAtAllIn: boardBefore,
+    potCents: totalPot,
+    heroEquity,
+    contestants: contestants.map((p, i) => ({
+      seat: p.seat,
+      name: p.name,
+      holeCards: p.hand as [string, string],
+      isHero: p.seat === heroSeat,
+      equity: equities[i],
+    })),
+  };
+  return { evNet, hadAllInShowdown: true, allInShowdown: snapshot };
 }
 
 // ─── Preflop analysis helpers ───────────────────────────────────────────
@@ -638,6 +652,7 @@ function detectLeaks(hand: Hand, playerSeat: number, bb: number): LeakHand | nul
     wentToShowdown: playerWentToShowdown(hand, playerSeat),
     evNet: leakEvResult.evNet,
     hadAllInShowdown: leakEvResult.hadAllInShowdown,
+    allInShowdown: leakEvResult.allInShowdown,
   };
 
   // Bad cold call — called a raise with weak holdings
@@ -931,6 +946,7 @@ export function analyzePlayer(data: PokerNowExport, playerId: string): PlayerSta
       wentToShowdown: wentToSD,
       evNet: evResult.evNet,
       hadAllInShowdown: evResult.hadAllInShowdown,
+      allInShowdown: evResult.allInShowdown,
     };
     allResults.push(hr);
     posStats[position].handResults.push(hr);

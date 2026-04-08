@@ -127,6 +127,23 @@ export interface PositionStat {
   handResults: HandResult[];
 }
 
+export interface AllInShowdown {
+  /** Board state at the moment the pot was locked. Length 0/3/4 cards. */
+  boardAtAllIn: string[];
+  /** Total pot (cents) contested at showdown. */
+  potCents: number;
+  /** Hero's Monte-Carlo equity at the all-in moment, [0, 1]. */
+  heroEquity: number;
+  /** All contestants (hero included) with known hole cards. */
+  contestants: Array<{
+    seat: number;
+    name: string;
+    holeCards: [string, string];
+    isHero: boolean;
+    equity: number;
+  }>;
+}
+
 export interface HandResult {
   handNumber: string;
   holeCards: [string, string] | null;
@@ -142,6 +159,9 @@ export interface HandResult {
   evNet: number;        // in cents — EV-adjusted result. Equals netResult
                         // unless an all-in runout situation was detected.
   hadAllInShowdown: boolean;
+  /** Populated only for hands where an all-in runout actually happened.
+   *  Mirrors the data that `computeHeroEv` used to derive `evNet`. */
+  allInShowdown?: AllInShowdown;
   leakType?: string;
 }
 

@@ -8,6 +8,13 @@ import {
 import { getCachedGameRawData, getCachedPlayerAnalysis } from '../lib/cache';
 import { computeOpponentStats, type OpponentStat } from '../lib/analysis';
 import type { HandResult, LeakHand } from '../lib/types';
+
+/** A single all-in hand surfaced to the "All-Ins" tab. */
+interface AllInHandRow {
+  gameId: string;
+  gameDate: string;
+  hand: HandResult;
+}
 import PreflopRangesTab from './PreflopRangesTab';
 import LeaksTab from './LeaksTab';
 import EvChart from './EvChart';
@@ -38,7 +45,9 @@ export default function MyStats() {
   const [leaks, setLeaks] = useState<LeakHand[]>([]);
   const [handsLoading, setHandsLoading] = useState(false);
   const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
-  const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions'>('Rivals');
+  // All-in hands with session context, for the "All-Ins" tab.
+  const [allInHands, setAllInHands] = useState<AllInHandRow[]>([]);
+  const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions' | 'All-Ins'>('Rivals');
   const [togglingPublic, setTogglingPublic] = useState(false);
 
   const handleTogglePublic = useCallback(async () => {
@@ -88,6 +97,8 @@ export default function MyStats() {
       const allHands: HandResult[] = [];
       const allLeaks: LeakHand[] = [];
       const perGameOpponents: { gameId: string; stats: OpponentStat[] }[] = [];
+      const allIns: AllInHandRow[] = [];
+      const docByGameId = new Map(docs.map(d => [d.gameId, d]));
 
       for (const entry of rawResults) {
         if (!entry) continue;
@@ -95,10 +106,18 @@ export default function MyStats() {
         allHands.push(...analysis.handResults);
         allLeaks.push(...analysis.leaks);
         perGameOpponents.push({ gameId: entry.gameId, stats: computeOpponentStats(entry.raw, entry.pokerNowId) });
+
+        const gameDate = docByGameId.get(entry.gameId)?.gameDate ?? '';
+        for (const h of analysis.handResults) {
+          if (h.allInShowdown) {
+            allIns.push({ gameId: entry.gameId, gameDate, hand: h });
+          }
+        }
       }
 
       setHandResults(allHands);
       setLeaks(allLeaks);
+      setAllInHands(allIns);
 
       // Build claim map: (gameId, pokerNowId) → uid
       const claimMap = new Map<string, string>();
@@ -331,7 +350,7 @@ export default function MyStats() {
 
           {/* Tab Bar */}
           <div className="flex gap-1 bg-bg-secondary rounded-lg p-1">
-            {(['Ranges', 'Leaks', 'Rivals', 'Sessions'] as const).map(tab => (
+            {(['Ranges', 'Leaks', 'Rivals', 'Sessions', 'All-Ins'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -475,8 +494,210 @@ export default function MyStats() {
               </table>
             </div>
           )}
+
+          {/* All-Ins Tab */}
+          {activeTab === 'All-Ins' && (
+            <div className="bg-bg-card border border-border rounded-lg p-6">
+              {handsLoading ? (
+                <div className="flex items-center justify-center py-12 text-text-muted">
+                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                  Loading hand data...
+                </div>
+              ) : (
+                <AllInsTable rows={allInHands} />
+              )}
+            </div>
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+// ─── All-Ins Table ─────────────────────────────────────────────────────
+
+const SUIT_SYMBOL: Record<string, string> = { s: '♠', h: '♥', d: '♦', c: '♣' };
+const SUIT_COLOR: Record<string, string> = {
+  s: '#e2e8f0',
+  c: '#22c55e',
+  d: '#60a5fa',
+  h: '#ef4444',
+};
+
+function formatCard(card: string) {
+  if (!card || card.length < 2) return <span>{card}</span>;
+  const rank = card[0].toUpperCase();
+  const suit = card[1].toLowerCase();
+  return (
+    <span style={{ color: SUIT_COLOR[suit] ?? '#e2e8f0' }}>
+      {rank}
+      {SUIT_SYMBOL[suit] ?? suit}
+    </span>
+  );
+}
+
+function Cards({ cards }: { cards: string[] }) {
+  if (cards.length === 0) return <span className="text-text-muted italic text-xs">preflop</span>;
+  return (
+    <span className="font-mono">
+      {cards.map((c, i) => (
+        <span key={i}>
+          {i > 0 && ' '}
+          {formatCard(c)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function fmtMoney(cents: number): { str: string; positive: boolean } {
+  const d = cents / 100;
+  return {
+    str: `${d >= 0 ? '+' : '-'}$${Math.abs(d).toFixed(2)}`,
+    positive: d >= 0,
+  };
+}
+
+type SortMode = 'recent' | 'luck';
+
+function AllInsTable({ rows }: { rows: AllInHandRow[] }) {
+  const [sortMode, setSortMode] = useState<SortMode>('luck');
+
+  const sorted = useMemo(() => {
+    const copy = [...rows];
+    if (sortMode === 'luck') {
+      copy.sort((a, b) => {
+        const la = Math.abs(a.hand.netResult - a.hand.evNet);
+        const lb = Math.abs(b.hand.netResult - b.hand.evNet);
+        return lb - la;
+      });
+    } else {
+      copy.sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''));
+    }
+    return copy;
+  }, [rows, sortMode]);
+
+  const summary = useMemo(() => {
+    const actual = rows.reduce((s, r) => s + r.hand.netResult, 0);
+    const ev = rows.reduce((s, r) => s + r.hand.evNet, 0);
+    return { count: rows.length, actual, ev, luck: actual - ev };
+  }, [rows]);
+
+  if (rows.length === 0) {
+    return (
+      <div className="text-center py-12 text-text-muted text-sm">
+        No all-in showdowns yet. This tab fills up once you get chips in with cards exposed.
+      </div>
+    );
+  }
+
+  const luckFmt = fmtMoney(summary.luck);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <SummaryStat label="All-ins" value={summary.count.toString()} />
+        <SummaryStat label="Actual" value={fmtMoney(summary.actual).str} color={fmtMoney(summary.actual).positive ? 'text-stat-green' : 'text-stat-red'} />
+        <SummaryStat label="EV" value={fmtMoney(summary.ev).str} color="text-text-muted" />
+        <SummaryStat label="Luck" value={luckFmt.str} color={luckFmt.positive ? 'text-stat-green' : 'text-stat-red'} />
+      </div>
+
+      {/* Sort toggle */}
+      <div className="flex items-center justify-between">
+        <div className="text-text-muted text-xs">
+          Each row is one all-in hand, with your equity at the moment of commitment.
+        </div>
+        <div className="flex gap-1 bg-bg-secondary rounded-md p-0.5 text-xs">
+          {(['luck', 'recent'] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => setSortMode(m)}
+              className={`px-2.5 py-1 rounded transition-colors ${
+                sortMode === m
+                  ? 'bg-bg-card text-text-primary'
+                  : 'text-text-muted hover:text-text-secondary'
+              }`}
+            >
+              {m === 'luck' ? 'Biggest swings' : 'Most recent'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
+              <th className="text-left p-2">Date</th>
+              <th className="text-left p-2">My hand</th>
+              <th className="text-left p-2 hidden lg:table-cell">vs</th>
+              <th className="text-left p-2 hidden md:table-cell">Board at all-in</th>
+              <th className="text-right p-2 font-mono">Equity</th>
+              <th className="text-right p-2 font-mono">Pot</th>
+              <th className="text-right p-2 font-mono">Actual</th>
+              <th className="text-right p-2 font-mono">EV</th>
+              <th className="text-right p-2 font-mono">Luck</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r, i) => {
+              const snap = r.hand.allInShowdown!;
+              const hero = snap.contestants.find(c => c.isHero);
+              const oppos = snap.contestants.filter(c => !c.isHero);
+              const actual = fmtMoney(r.hand.netResult);
+              const ev = fmtMoney(r.hand.evNet);
+              const luck = fmtMoney(r.hand.netResult - r.hand.evNet);
+              const equityPct = (snap.heroEquity * 100).toFixed(0);
+              const dateStr = r.gameDate
+                ? new Date(r.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : '—';
+              return (
+                <tr key={`${r.gameId}-${r.hand.handNumber}-${i}`} className="border-b border-border/30">
+                  <td className="p-2 text-text-muted text-xs whitespace-nowrap">{dateStr}</td>
+                  <td className="p-2">
+                    {hero ? <Cards cards={hero.holeCards} /> : '—'}
+                  </td>
+                  <td className="p-2 hidden lg:table-cell">
+                    <div className="flex flex-col gap-0.5 text-xs">
+                      {oppos.map((o, j) => (
+                        <div key={j} className="flex items-center gap-1.5">
+                          <Cards cards={o.holeCards} />
+                          <span className="text-text-muted truncate max-w-[80px]">{o.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="p-2 hidden md:table-cell">
+                    <Cards cards={snap.boardAtAllIn} />
+                  </td>
+                  <td className="p-2 text-right font-mono text-text-secondary">{equityPct}%</td>
+                  <td className="p-2 text-right font-mono text-text-muted">
+                    ${(snap.potCents / 100).toFixed(0)}
+                  </td>
+                  <td className={`p-2 text-right font-mono font-bold ${actual.positive ? 'text-stat-green' : 'text-stat-red'}`}>
+                    {actual.str}
+                  </td>
+                  <td className="p-2 text-right font-mono text-text-muted">{ev.str}</td>
+                  <td className={`p-2 text-right font-mono font-bold ${luck.positive ? 'text-stat-green' : 'text-stat-red'}`}>
+                    {luck.str}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="bg-bg-secondary/60 border border-border rounded-md px-3 py-2">
+      <div className="text-text-muted text-[10px] uppercase tracking-wider">{label}</div>
+      <div className={`font-mono text-base font-bold ${color ?? 'text-text-primary'}`}>{value}</div>
     </div>
   );
 }

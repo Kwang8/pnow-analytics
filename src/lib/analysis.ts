@@ -223,118 +223,128 @@ function getBoard(hand: Hand): string[] {
 // ─── All-in EV detection ───────────────────────────────────────────────
 //
 // Find "all-in with runout" situations and compute the hero's EV-adjusted
-// net result for the hand. An all-in moment is the first point at which
-// every non-folded player has committed their entire starting stack. If
-// fewer than 5 community cards have been dealt at that moment, there is
-// variance to adjust for — we snapshot the board, collect the contestants'
-// known hole cards, and run a Monte-Carlo equity calc.
+// net result for the hand. The all-in moment is the last chip-committing
+// event in the hand (the closing call / fold). If community cards are
+// dealt after that moment AND at least one non-folded player committed
+// their entire starting stack, the runout is "locked" and we can compute
+// an equity-adjusted result.
+//
+// This correctly handles cover-stack situations: if you have a bigger
+// stack and call a short stack's shove, you are not technically all-in
+// (you still have chips), but the pot is still locked because there is
+// nobody left to bet against.
+//
+// Side-pot hands (≥2 non-folded contestants with unequal called amounts)
+// are skipped — we only model a single main pot.
 
 interface HeroEvResult {
   evNet: number;           // EV-adjusted net in cents
   hadAllInShowdown: boolean;
 }
 
+// Events that represent a real chip-committing or fold decision.
+// CHECK is intentionally excluded: after an all-in runout PokerNow may
+// emit no-op checks for covered players, and we want the snapshot to be
+// at the actual commitment, not at a trailing check.
+const DECISIVE_TYPES: number[] = [
+  EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND,
+  EVT.CALL, EVT.BET_RAISE, EVT.FOLD,
+];
+
 function computeHeroEv(hand: Hand, heroSeat: number, actualNet: number): HeroEvResult {
   const noEv: HeroEvResult = { evNet: actualNet, hadAllInShowdown: false };
 
   const hero = hand.players.find(p => p.seat === heroSeat);
-  if (!hero) return noEv;
+  if (!hero?.hand) return noEv;
 
-  // Per-seat accumulators.
+  // 1. Find last decisive event index.
+  let lastDecisiveIdx = -1;
+  for (let i = 0; i < hand.events.length; i++) {
+    if (DECISIVE_TYPES.includes(hand.events[i].payload.type)) {
+      lastDecisiveIdx = i;
+    }
+  }
+  if (lastDecisiveIdx < 0) return noEv;
+
+  // 2. Split community cards into before-or-at vs strictly after the
+  // last decisive event. Cards after = the runout we're adjusting for.
+  const boardBefore: string[] = [];
+  let boardAfterCount = 0;
+  for (let i = 0; i < hand.events.length; i++) {
+    const p = hand.events[i].payload;
+    if (p.type !== EVT.COMMUNITY) continue;
+    const cards = (p as { cards: string[] }).cards;
+    if (i <= lastDecisiveIdx) boardBefore.push(...cards);
+    else boardAfterCount += cards.length;
+  }
+  if (boardAfterCount === 0) return noEv;  // no runout to adjust
+
+  // 3. Walk events to build final invested/folded/uncalled state.
   const startStack = new Map<number, number>();
   const invested = new Map<number, number>();
   const roundCommit = new Map<number, number>();
+  const uncalledReturned = new Map<number, number>();
   for (const p of hand.players) {
     startStack.set(p.seat, p.stack);
     invested.set(p.seat, 0);
     roundCommit.set(p.seat, 0);
+    uncalledReturned.set(p.seat, 0);
   }
   const folded = new Set<number>();
-  const boardBefore: string[] = [];
-
-  let allInMomentFound = false;
-  let allInBoard: string[] = [];
-
-  const flushRound = () => {
-    for (const [seat, v] of roundCommit) {
-      invested.set(seat, (invested.get(seat) ?? 0) + v);
-      roundCommit.set(seat, 0);
-    }
-  };
-
-  const remaining = (seat: number): number =>
-    (startStack.get(seat) ?? 0) - (invested.get(seat) ?? 0) - (roundCommit.get(seat) ?? 0);
-
-  const checkAllInReached = (): boolean => {
-    const stillIn = [...startStack.keys()].filter(s => !folded.has(s));
-    if (stillIn.length < 2) return false;
-    return stillIn.every(s => remaining(s) === 0);
-  };
-
-  const snapshotIfAllIn = () => {
-    if (!allInMomentFound && checkAllInReached()) {
-      allInMomentFound = true;
-      allInBoard = [...boardBefore];
-    }
-  };
 
   for (const e of hand.events) {
     const p = e.payload;
-
     if (p.type === EVT.COMMUNITY) {
-      // Flush round, then check BEFORE adding new cards so the snapshot
-      // reflects the board state at the moment of commitment.
-      flushRound();
-      snapshotIfAllIn();
-      boardBefore.push(...(p as { cards: string[] }).cards);
+      // Flush the round: move per-round commitments into lifetime invested.
+      for (const [seat, v] of roundCommit) {
+        invested.set(seat, (invested.get(seat) ?? 0) + v);
+        roundCommit.set(seat, 0);
+      }
       continue;
     }
-
-    const seat = 'seat' in p ? (p as { seat: number }).seat : -1;
-    if (seat < 0) continue;
-
-    if (p.type === EVT.FOLD) {
-      folded.add(seat);
-      snapshotIfAllIn();
+    if (!('seat' in p)) continue;
+    const seat = (p as { seat: number }).seat;
+    if (p.type === EVT.FOLD) { folded.add(seat); continue; }
+    if (p.type === EVT.UNCALLED_RETURNED) {
+      const v = (p as { value: number }).value;
+      uncalledReturned.set(seat, (uncalledReturned.get(seat) ?? 0) + v);
       continue;
     }
-
     if (([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
-      const value = (p as { value: number }).value;
-      roundCommit.set(seat, Math.max(roundCommit.get(seat) ?? 0, value));
-      snapshotIfAllIn();
+      const v = (p as { value: number }).value;
+      // PokerNow bet values are cumulative per round, so take max.
+      roundCommit.set(seat, Math.max(roundCommit.get(seat) ?? 0, v));
     }
   }
+  // Final flush after the loop.
+  for (const [seat, v] of roundCommit) {
+    invested.set(seat, (invested.get(seat) ?? 0) + v);
+  }
 
-  flushRound();
-  snapshotIfAllIn();
-
-  if (!allInMomentFound) return noEv;
-  if (allInBoard.length >= 5) return noEv;          // full board already out — no variance
-  if (!hero.hand) return noEv;                       // hero's cards unknown
-  if (folded.has(heroSeat)) return noEv;             // hero not in the showdown
-
-  // All remaining contestants must have known hole cards.
+  // 4. Contestants: non-folded players with known hole cards.
+  if (folded.has(heroSeat)) return noEv;
   const contestants = hand.players.filter(p => !folded.has(p.seat));
   if (contestants.length < 2) return noEv;
   if (contestants.some(p => !p.hand)) return noEv;
 
-  // Skip side-pot situations: require all contestants to have invested the
-  // same amount (after uncalled returns). Uneven investments mean side pots
-  // and our single-pot equity calc would be misleading.
-  const uncalledBySeat = new Map<number, number>();
-  for (const e of hand.events) {
-    if (e.payload.type === EVT.UNCALLED_RETURNED) {
-      const ev = e.payload as { seat: number; value: number };
-      uncalledBySeat.set(ev.seat, (uncalledBySeat.get(ev.seat) ?? 0) + ev.value);
-    }
-  }
-  const effInvest = (seat: number) => (invested.get(seat) ?? 0) - (uncalledBySeat.get(seat) ?? 0);
-  const heroEff = effInvest(heroSeat);
-  if (!contestants.every(p => effInvest(p.seat) === heroEff)) return noEv;
+  // 5. Committed = what each player actually put in that was called.
+  // (invested minus any uncalled-bet refund).
+  const committed = (seat: number) =>
+    (invested.get(seat) ?? 0) - (uncalledReturned.get(seat) ?? 0);
 
-  // Total contested pot = sum of POT_WON values (these exclude uncalled returns).
-  // Hero's actual share of the pot = POT_WON events for hero.
+  // 6. At least one contestant must be all-in. All-in = the player's
+  // committed amount reaches their starting stack for this hand.
+  const anyoneAllIn = contestants.some(p =>
+    committed(p.seat) >= (startStack.get(p.seat) ?? 0),
+  );
+  if (!anyoneAllIn) return noEv;
+
+  // 7. Side-pot guard: require all contestants to have contributed the
+  // same called amount. Unequal means a side pot, which we don't model.
+  const heroCommitted = committed(heroSeat);
+  if (!contestants.every(p => committed(p.seat) === heroCommitted)) return noEv;
+
+  // 8. Pot from POT_WON events + hero's actual share.
   let totalPot = 0;
   let heroPotWon = 0;
   for (const e of hand.events) {
@@ -346,14 +356,14 @@ function computeHeroEv(hand: Hand, heroSeat: number, actualNet: number): HeroEvR
   }
   if (totalPot <= 0) return noEv;
 
-  // Run Monte Carlo equity.
+  // 9. Equity at the all-in moment → EV-adjusted net.
   const holes = contestants.map(p => p.hand as [string, string]);
   const heroIdx = contestants.findIndex(p => p.seat === heroSeat);
-  const equities = equity(holes, allInBoard);
+  const equities = equity(holes, boardBefore);
   const heroEquity = equities[heroIdx];
 
-  // evDelta replaces the lucky/unlucky POT_WON outcome with the expected
-  // share. evNet = actualNet - heroPotWon + heroEquity * totalPot.
+  // evNet replaces the lucky/unlucky POT_WON outcome with the expected
+  // share, leaving everything else about the hand unchanged.
   const evNet = Math.round(actualNet - heroPotWon + heroEquity * totalPot);
   return { evNet, hadAllInShowdown: true };
 }

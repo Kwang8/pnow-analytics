@@ -2,13 +2,18 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { PokerNowExport, PlayerStats, OverallStats } from './lib/types';
 import { analyzePlayer, analyzeOverall } from './lib/analysis';
 import { decodeShareData, getShareDataFromUrl } from './lib/share';
-import { saveGame, getGameRawData, findExistingGame, getGameClaims, refreshGame } from './lib/gameStore';
+import {
+  saveGame, getGameRawData, findExistingGame, getGameClaims, refreshGame,
+  getMyGroups, createGroup, deleteGroup,
+  type GroupDoc,
+} from './lib/gameStore';
 import { useAuth } from './lib/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import UsernameSetup from './components/UsernameSetup';
 import OverallView from './components/OverallView';
 import Dashboard from './components/Dashboard';
 import GameLibrary from './components/GameLibrary';
+import GroupsList from './components/GroupsList';
 import MyStats from './components/MyStats';
 import Leaderboard from './components/Leaderboard';
 import AuthButton from './components/AuthButton';
@@ -19,7 +24,7 @@ import { Share2, Check, BarChart3, Trophy, UserPlus, Plus, Loader2, Menu, X } fr
 type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard';
 
 export default function App() {
-  const { user, loading: authLoading, needsUsername } = useAuth();
+  const { user, loading: authLoading, needsUsername, username } = useAuth();
   const [data, setData] = useState<PokerNowExport | null>(null);
   const [contentView, setContentView] = useState<ContentView>('empty');
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -39,8 +44,34 @@ export default function App() {
   // Map of gameId -> (pokerNowId -> uid | null)
   const [claimedMap, setClaimedMap] = useState<Map<string, Map<string, string | null>>>(new Map());
 
+  // Groups
+  const [groups, setGroups] = useState<GroupDoc[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
   // Mobile sidebar
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const reloadGroups = useCallback(() => {
+    if (!user) return;
+    getMyGroups(user.uid).then(setGroups).catch(err => console.error('Failed to load groups:', err));
+  }, [user]);
+
+  useEffect(() => {
+    reloadGroups();
+  }, [reloadGroups]);
+
+  const handleCreateGroup = useCallback(async (name: string) => {
+    if (!user) return;
+    await createGroup(user.uid, name, username ?? '');
+    reloadGroups();
+  }, [user, username, reloadGroups]);
+
+  const handleDeleteGroup = useCallback(async (groupId: string) => {
+    if (!user) return;
+    await deleteGroup(groupId, user.uid);
+    if (selectedGroupId === groupId) setSelectedGroupId(null);
+    reloadGroups();
+  }, [user, selectedGroupId, reloadGroups]);
 
   // Check for shared game in URL on mount
   useEffect(() => {
@@ -273,8 +304,26 @@ export default function App() {
         </div>
       )}
 
-      {/* Divider + game list */}
+      {/* Divider + groups */}
       <div className="border-t border-border mx-3" />
+      <div className="px-3 pt-2 pb-1">
+        <span className="text-text-muted text-[10px] uppercase tracking-wider font-medium">Groups</span>
+      </div>
+      <div className="px-1.5">
+        {user && (
+          <GroupsList
+            groups={groups}
+            selectedGroupId={selectedGroupId}
+            onSelectGroup={setSelectedGroupId}
+            onCreateGroup={handleCreateGroup}
+            onDeleteGroup={handleDeleteGroup}
+            onGroupsChanged={reloadGroups}
+          />
+        )}
+      </div>
+
+      {/* Divider + game list */}
+      <div className="border-t border-border mx-3 mt-2" />
       <div className="px-3 pt-2 pb-1">
         <span className="text-text-muted text-[10px] uppercase tracking-wider font-medium">Games</span>
       </div>
@@ -284,6 +333,9 @@ export default function App() {
             onOpenGame={handleOpenGame}
             selectedGameId={currentGameId}
             refreshKey={refreshKey}
+            groups={groups}
+            selectedGroupId={selectedGroupId}
+            onGroupsChanged={reloadGroups}
           />
         )}
       </div>

@@ -436,8 +436,9 @@ function isWeakHolding(cards: [string, string]): boolean {
   const bothBelowTen = rankValues.every(v => v < 8); // below T
   const suited = suits[0] === suits[1];
   const connected = Math.abs(rankValues[0] - rankValues[1]) === 1;
+  const pocketPair = rankValues[0] === rankValues[1];
 
-  if (bothBelowTen && !(suited && connected)) return true;
+  if (bothBelowTen && !pocketPair && !(suited && connected)) return true;
   return false;
 }
 

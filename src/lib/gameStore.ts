@@ -1,5 +1,5 @@
 import {
-  collection, doc, setDoc, getDoc, getDocs, query, where, serverTimestamp, writeBatch, updateDoc, arrayUnion,
+  collection, doc, setDoc, getDoc, getDocs, query, where, serverTimestamp, writeBatch, updateDoc, arrayUnion, arrayRemove, deleteDoc,
   type Timestamp,
 } from 'firebase/firestore';
 import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
@@ -444,6 +444,128 @@ export async function getUserProfiles(uids: string[]): Promise<Map<string, { dis
     }
   }
   return map;
+}
+
+// ─── Groups ─────────────────────────────────────────────────────────────
+
+export interface GroupDoc {
+  id: string;
+  ownerUid: string;
+  name: string;
+  createdAt: Timestamp;
+  gameIds: string[];
+  members: string[];
+  memberUsernames: string[];
+}
+
+export async function createGroup(uid: string, name: string, username: string): Promise<string> {
+  const ref = doc(collection(db, 'groups'));
+  await setDoc(ref, {
+    ownerUid: uid,
+    name: name.trim(),
+    createdAt: serverTimestamp(),
+    gameIds: [],
+    members: [uid],
+    memberUsernames: [username],
+  });
+  return ref.id;
+}
+
+export async function getMyGroups(uid: string): Promise<GroupDoc[]> {
+  const q = query(collection(db, 'groups'), where('members', 'array-contains', uid));
+  const snap = await getDocs(q);
+  const groups = snap.docs.map(d => ({ id: d.id, ...d.data() } as GroupDoc));
+  groups.sort((a, b) => a.name.localeCompare(b.name));
+  return groups;
+}
+
+export async function deleteGroup(groupId: string, uid: string): Promise<boolean> {
+  const ref = doc(db, 'groups', groupId);
+  const snap = await getDoc(ref);
+  if (!snap.exists() || snap.data().ownerUid !== uid) return false;
+  await deleteDoc(ref);
+  return true;
+}
+
+export async function renameGroup(groupId: string, name: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), { name: name.trim() });
+}
+
+export async function addGameToGroup(groupId: string, gameId: string): Promise<void> {
+  const gRef = doc(db, 'groups', groupId);
+  const gSnap = await getDoc(gRef);
+  if (!gSnap.exists()) return;
+  const groupMembers = (gSnap.data().members ?? []) as string[];
+
+  const batch = writeBatch(db);
+  batch.update(gRef, { gameIds: arrayUnion(gameId) });
+  // Share the game with every group member so they can see it
+  if (groupMembers.length > 0) {
+    batch.update(doc(db, 'games', gameId), {
+      members: arrayUnion(...groupMembers),
+    });
+  }
+  await batch.commit();
+}
+
+export async function removeGameFromGroup(groupId: string, gameId: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), { gameIds: arrayRemove(gameId) });
+}
+
+export async function inviteToGroup(
+  groupId: string,
+  ownerUid: string,
+  inviteeUid: string,
+  inviteeUsername: string,
+  inviteeEmail: string,
+): Promise<void> {
+  const gRef = doc(db, 'groups', groupId);
+  const gSnap = await getDoc(gRef);
+  if (!gSnap.exists()) throw new Error('Group not found');
+  const data = gSnap.data();
+  if (data.ownerUid !== ownerUid) throw new Error('Only the group owner can invite');
+
+  const gameIds = (data.gameIds ?? []) as string[];
+
+  const batch = writeBatch(db);
+  batch.update(gRef, {
+    members: arrayUnion(inviteeUid),
+    memberUsernames: arrayUnion(inviteeUsername),
+  });
+  // Share every game in the group with the new member
+  for (const gameId of gameIds) {
+    batch.update(doc(db, 'games', gameId), {
+      members: arrayUnion(inviteeUid),
+      memberEmails: arrayUnion(inviteeEmail),
+    });
+  }
+  await batch.commit();
+}
+
+export async function kickFromGroup(
+  groupId: string,
+  ownerUid: string,
+  kickUid: string,
+  kickUsername: string,
+): Promise<void> {
+  const gRef = doc(db, 'groups', groupId);
+  const gSnap = await getDoc(gRef);
+  if (!gSnap.exists()) throw new Error('Group not found');
+  const data = gSnap.data();
+  if (data.ownerUid !== ownerUid) throw new Error('Only the group owner can remove members');
+  if (kickUid === ownerUid) throw new Error('The owner cannot be removed');
+
+  await updateDoc(gRef, {
+    members: arrayRemove(kickUid),
+    memberUsernames: arrayRemove(kickUsername),
+  });
+}
+
+export async function leaveGroup(groupId: string, uid: string, username: string): Promise<void> {
+  await updateDoc(doc(db, 'groups', groupId), {
+    members: arrayRemove(uid),
+    memberUsernames: arrayRemove(username),
+  });
 }
 
 // ─── Check if game already saved ────────────────────────────────────────

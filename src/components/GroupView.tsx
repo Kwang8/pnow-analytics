@@ -4,6 +4,7 @@ import {
   getAllGamePlayers, getUserProfiles,
   type GroupDoc,
 } from '../lib/gameStore';
+import { getCachedGameRawData, getCachedPlayerAnalysis } from '../lib/cache';
 import { useAuth } from '../lib/AuthContext';
 
 interface Props {
@@ -18,8 +19,9 @@ interface PlayerRow {
   isClaimed: boolean;
   sessions: number;
   handsPlayed: number;
-  actualCents: number;
-  evCents: number;
+  allInCount: number;
+  allInActualCents: number;
+  allInEvCents: number;
 }
 
 export default function GroupView({ group }: Props) {
@@ -45,10 +47,13 @@ export default function GroupView({ group }: Props) {
 
     (async () => {
       try {
-        // A single batched read of gamePlayers docs is enough now that
-        // `evPnl` is denormalized onto each doc. No raw-data load, no
-        // per-player `analyzePlayer` — just aggregation.
-        const allGps = await getAllGamePlayers(gameIds);
+        // Load gamePlayer docs (the list of seats per game + the claim map)
+        // and the raw hand histories in parallel.
+        const [allGps, rawByGame] = await Promise.all([
+          getAllGamePlayers(gameIds),
+          Promise.all(gameIds.map(async (id) => ({ id, raw: await getCachedGameRawData(id) }))),
+        ]);
+        const rawMap = new Map(rawByGame.map(r => [r.id, r.raw]));
 
         // Aggregate per-player stats across all games.
         // Identity rule: if a poker-now player is claimed to a uid, merge by that uid;
@@ -57,33 +62,51 @@ export default function GroupView({ group }: Props) {
           displayName: string;
           username: string;
           uid: string | null;
-          actualCents: number;
-          evCents: number;
           sessions: number;
           handsPlayed: number;
+          allInCount: number;
+          allInActualCents: number;
+          allInEvCents: number;
         }>();
 
         for (const gp of allGps) {
-          const actual = gp.pnl;
-          const ev = gp.evPnl ?? gp.pnl;       // older docs fall back to actual
+          const raw = rawMap.get(gp.gameId);
+          if (!raw) continue;
+
+          // Get per-hand analysis for this player (cached). Slow on first
+          // call per (gameId, pokerNowId), free thereafter.
+          const analysis = getCachedPlayerAnalysis(gp.gameId, raw, gp.pokerNowId);
+
+          let allInActual = 0;
+          let allInEv = 0;
+          let allInCount = 0;
+          for (const h of analysis.handResults) {
+            if (h.hadAllInShowdown) {
+              allInActual += h.netResult;
+              allInEv += h.evNet;
+              allInCount += 1;
+            }
+          }
 
           const key = gp.uid ? `uid:${gp.uid}` : `name:${gp.playerName.toLowerCase()}`;
           const prev = agg.get(key);
           if (prev) {
-            prev.actualCents += actual;
-            prev.evCents += ev;
             prev.sessions += 1;
             prev.handsPlayed += gp.handsPlayed;
+            prev.allInCount += allInCount;
+            prev.allInActualCents += allInActual;
+            prev.allInEvCents += allInEv;
             if (gp.uid && !prev.uid) prev.uid = gp.uid;
           } else {
             agg.set(key, {
               displayName: gp.playerName,
               username: '',
               uid: gp.uid,
-              actualCents: actual,
-              evCents: ev,
               sessions: 1,
               handsPlayed: gp.handsPlayed,
+              allInCount,
+              allInActualCents: allInActual,
+              allInEvCents: allInEv,
             });
           }
         }
@@ -109,11 +132,13 @@ export default function GroupView({ group }: Props) {
           isClaimed: !!v.uid,
           sessions: v.sessions,
           handsPlayed: v.handsPlayed,
-          actualCents: v.actualCents,
-          evCents: v.evCents,
+          allInCount: v.allInCount,
+          allInActualCents: v.allInActualCents,
+          allInEvCents: v.allInEvCents,
         }));
 
-        finalRows.sort((a, b) => b.actualCents - a.actualCents);
+        // Sort by all-in P&L descending — biggest all-in winners at the top.
+        finalRows.sort((a, b) => b.allInActualCents - a.allInActualCents);
         if (!cancelled) {
           setRows(finalRows);
           setLoading(false);
@@ -135,9 +160,14 @@ export default function GroupView({ group }: Props) {
   const summary = useMemo(() => {
     if (!rows) return null;
     const totalHands = rows.reduce((s, r) => s + r.handsPlayed, 0);
-    const totalActual = rows.reduce((s, r) => s + r.actualCents, 0);
-    const totalEv = rows.reduce((s, r) => s + r.evCents, 0);
-    return { players: rows.length, totalHands, totalActual, totalEv };
+    const totalAllInActual = rows.reduce((s, r) => s + r.allInActualCents, 0);
+    const totalAllInEv = rows.reduce((s, r) => s + r.allInEvCents, 0);
+    return {
+      players: rows.length,
+      totalHands,
+      totalAllInActual,
+      totalAllInEv,
+    };
   }, [rows]);
 
   return (
@@ -156,19 +186,19 @@ export default function GroupView({ group }: Props) {
         </p>
       </div>
 
-      {/* Summary cards — fixed height to avoid layout shift while loading */}
+      {/* Summary strip */}
       {summary && summary.players > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <SummaryCard label="Players" value={summary.players.toString()} />
           <SummaryCard label="Games" value={(group.gameIds?.length ?? 0).toString()} />
           <SummaryCard
-            label="Total Actual"
-            value={fmtDollar(summary.totalActual / 100)}
-            color={summary.totalActual >= 0 ? 'text-stat-green' : 'text-stat-red'}
+            label="All-In Actual"
+            value={fmtDollar(summary.totalAllInActual / 100)}
+            color={summary.totalAllInActual >= 0 ? 'text-stat-green' : 'text-stat-red'}
           />
           <SummaryCard
-            label="Total EV"
-            value={fmtDollar(summary.totalEv / 100)}
+            label="All-In EV"
+            value={fmtDollar(summary.totalAllInEv / 100)}
             color="text-text-muted"
           />
         </div>
@@ -179,9 +209,9 @@ export default function GroupView({ group }: Props) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-text-primary font-semibold flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-text-muted" />
-            Player Leaderboard
+            All-In Leaderboard
           </h3>
-          <span className="text-text-muted text-xs">Actual vs Expected (all-in EV adjusted)</span>
+          <span className="text-text-muted text-xs">Cumulative outcome on all-in showdowns only</span>
         </div>
 
         {loading ? (
@@ -203,17 +233,18 @@ export default function GroupView({ group }: Props) {
                   <th className="text-left p-3 pl-4">#</th>
                   <th className="text-left p-3">Player</th>
                   <th className="text-right p-3 font-mono">Sessions</th>
-                  <th className="text-right p-3 font-mono hidden md:table-cell">Hands</th>
-                  <th className="text-right p-3 font-mono">Actual</th>
-                  <th className="text-right p-3 font-mono">EV</th>
+                  <th className="text-right p-3 font-mono hidden md:table-cell">All-Ins</th>
+                  <th className="text-right p-3 font-mono">All-In Actual</th>
+                  <th className="text-right p-3 font-mono">All-In EV</th>
                   <th className="text-right p-3 font-mono pr-4">Luck</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => {
-                  const actualD = r.actualCents / 100;
-                  const evD = r.evCents / 100;
+                  const actualD = r.allInActualCents / 100;
+                  const evD = r.allInEvCents / 100;
                   const luckD = actualD - evD;
+                  const hasAllIns = r.allInCount > 0;
                   return (
                     <tr
                       key={r.key}
@@ -240,17 +271,27 @@ export default function GroupView({ group }: Props) {
                       </td>
                       <td className="p-3 text-right font-mono text-text-secondary">{r.sessions}</td>
                       <td className="p-3 text-right font-mono text-text-secondary hidden md:table-cell">
-                        {r.handsPlayed.toLocaleString()}
+                        {r.allInCount}
                       </td>
-                      <td className={`p-3 text-right font-mono font-bold ${actualD >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                        {fmtDollar(actualD)}
-                      </td>
-                      <td className="p-3 text-right font-mono text-text-muted">
-                        {fmtDollar(evD)}
-                      </td>
-                      <td className={`p-3 pr-4 text-right font-mono font-semibold ${luckD >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                        {fmtDollar(luckD)}
-                      </td>
+                      {hasAllIns ? (
+                        <>
+                          <td className={`p-3 text-right font-mono font-bold ${actualD >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+                            {fmtDollar(actualD)}
+                          </td>
+                          <td className="p-3 text-right font-mono text-text-muted">
+                            {fmtDollar(evD)}
+                          </td>
+                          <td className={`p-3 pr-4 text-right font-mono font-semibold ${luckD >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
+                            {fmtDollar(luckD)}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="p-3 text-right font-mono text-text-muted/50">—</td>
+                          <td className="p-3 text-right font-mono text-text-muted/50">—</td>
+                          <td className="p-3 pr-4 text-right font-mono text-text-muted/50">—</td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}

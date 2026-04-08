@@ -80,12 +80,17 @@ export default function MyStats() {
     if (docs.length === 0) return;
     setHandsLoading(true);
 
-    const gameIds = docs.map(d => d.gameId);
+    // Sort sessions chronologically so the hand-level outputs
+    // (handResults, allInHands) end up in true time order.
+    const sortedDocs = [...docs].sort((a, b) =>
+      (a.gameDate ?? '').localeCompare(b.gameDate ?? ''),
+    );
+    const gameIds = sortedDocs.map(d => d.gameId);
 
     // Load raw data (cached) + gamePlayers claims in parallel
     Promise.all([
       Promise.all(
-        docs.map(async (doc) => {
+        sortedDocs.map(async (doc) => {
           const raw = await getCachedGameRawData(doc.gameId);
           if (!raw) return null;
           return { raw, pokerNowId: doc.pokerNowId, gameId: doc.gameId };
@@ -98,7 +103,7 @@ export default function MyStats() {
       const allLeaks: LeakHand[] = [];
       const perGameOpponents: { gameId: string; stats: OpponentStat[] }[] = [];
       const allIns: AllInHandRow[] = [];
-      const docByGameId = new Map(docs.map(d => [d.gameId, d]));
+      const docByGameId = new Map(sortedDocs.map(d => [d.gameId, d]));
 
       for (const entry of rawResults) {
         if (!entry) continue;
@@ -187,33 +192,30 @@ export default function MyStats() {
     return points;
   }, [sorted]);
 
-  // Cumulative actual vs EV-adjusted by session. Reads `evPnl` straight
-  // off the denormalized gamePlayers docs, so the chart renders
-  // immediately without waiting on hand-level analysis.
+  // Cumulative actual vs EV-adjusted restricted to *all-in* hands only.
+  // Non-all-in hands contribute 0 to both lines (actual == ev), so they'd
+  // just scale the axis without showing any divergence — we leave them out.
+  // Each data point is one all-in hand; the divergence between the two
+  // lines is your cumulative luck swing from getting it in.
   const evChart = useMemo(() => {
-    if (sorted.length === 0) return null;
+    if (allInHands.length === 0) return null;
     let cumActual = 0;
     let cumEv = 0;
     const points = [{ label: 'Start', actual: 0, ev: 0 }];
-    sorted.forEach((d, i) => {
-      const evCents = d.evPnl ?? d.pnl;
-      cumActual += d.pnl / 100;
-      cumEv += evCents / 100;
-      const date = d.gameDate
-        ? new Date(d.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    allInHands.forEach((row, i) => {
+      cumActual += row.hand.netResult / 100;
+      cumEv += row.hand.evNet / 100;
+      const date = row.gameDate
+        ? new Date(row.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : `#${i + 1}`;
-      const label = sorted.length > 1 ? `${date} (#${i + 1})` : date;
       points.push({
-        label,
+        label: `${date} #${i + 1}`,
         actual: Math.round(cumActual * 100) / 100,
         ev: Math.round(cumEv * 100) / 100,
       });
     });
-    // "Has events" = at least one session has a non-trivial EV adjustment.
-    // Old docs without evPnl get pnl by fallback, so they contribute 0 delta.
-    const hasAllInEvents = sorted.some(d => d.evPnl !== undefined && d.evPnl !== d.pnl);
-    return { points, hasAllInEvents };
-  }, [sorted]);
+    return { points, hasAllInEvents: true };
+  }, [allInHands]);
 
   const totalSessions = docs.length;
   const totalHands = docs.reduce((s, d) => s + d.handsPlayed, 0);
@@ -302,13 +304,15 @@ export default function MyStats() {
             </div>
           </div>
 
-          {/* EV Chart — actual vs expected across sessions.
-              Data comes straight off the denormalized `evPnl` on
-              gamePlayers docs, so it paints on first load. */}
+          {/* EV Chart — actual vs expected across all-in hands only.
+              Each data point is one all-in showdown; non-all-in hands
+              are deliberately excluded so the divergence between the
+              two lines represents only your luck from getting it in. */}
           <EvChart
             points={evChart?.points ?? [{ label: 'Start', actual: 0, ev: 0 }]}
             hasAllInEvents={evChart?.hasAllInEvents ?? false}
-            subtitle="Cumulative actual vs expected across all your sessions"
+            loading={handsLoading}
+            subtitle="Cumulative outcome on your all-in showdowns only"
           />
 
 

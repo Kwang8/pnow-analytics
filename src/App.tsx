@@ -14,13 +14,14 @@ import OverallView from './components/OverallView';
 import Dashboard from './components/Dashboard';
 import GameLibrary from './components/GameLibrary';
 import GroupsList from './components/GroupsList';
+import GroupView from './components/GroupView';
 import MyStats from './components/MyStats';
 import Leaderboard from './components/Leaderboard';
 import AuthButton from './components/AuthButton';
 import NewGameModal from './components/NewGameModal';
 import { Share2, Check, BarChart3, Trophy, Plus, Loader2, Menu, X } from 'lucide-react';
 
-type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard';
+type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard' | 'group';
 
 export default function App() {
   const { user, loading: authLoading, needsUsername, username } = useAuth();
@@ -53,6 +54,15 @@ export default function App() {
     if (!user) return;
     getMyGroups(user.uid).then(setGroups).catch(err => console.error('Failed to load groups:', err));
   }, [user]);
+
+  // Selecting a group (or clearing the selection via "All games") updates
+  // the main content: a group gets its own leaderboard view, while "All games"
+  // drops back to the empty state.
+  const handleSelectGroup = useCallback((id: string | null) => {
+    setSelectedGroupId(id);
+    setContentView(id ? 'group' : 'empty');
+    setSidebarOpen(false);
+  }, []);
 
   useEffect(() => {
     reloadGroups();
@@ -329,7 +339,7 @@ export default function App() {
           <GroupsList
             groups={groups}
             selectedGroupId={selectedGroupId}
-            onSelectGroup={setSelectedGroupId}
+            onSelectGroup={handleSelectGroup}
             onCreateGroup={handleCreateGroup}
             onDeleteGroup={handleDeleteGroup}
             onGroupsChanged={reloadGroups}
@@ -487,6 +497,11 @@ export default function App() {
             {contentView === 'mystats' && <MyStats />}
 
             {contentView === 'leaderboard' && <Leaderboard />}
+
+            {contentView === 'group' && selectedGroupId && (() => {
+              const g = groups.find(x => x.id === selectedGroupId);
+              return g ? <GroupView group={g} /> : null;
+            })()}
           </div>
         </main>
       </div>

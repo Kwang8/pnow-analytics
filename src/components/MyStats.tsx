@@ -286,14 +286,16 @@ export default function MyStats() {
             </div>
           </div>
 
-          {/* EV Chart — actual vs expected across sessions */}
-          {evChart && !handsLoading && (
-            <EvChart
-              points={evChart.points}
-              hasAllInEvents={evChart.hasAllInEvents}
-              subtitle="Cumulative actual vs expected across all your sessions"
-            />
-          )}
+          {/* EV Chart — actual vs expected across sessions.
+              Rendered unconditionally so its footprint is reserved from
+              first paint; the component handles the loading skeleton. */}
+          <EvChart
+            points={evChart?.points ?? [{ label: 'Start', actual: 0, ev: 0 }]}
+            hasAllInEvents={evChart?.hasAllInEvents ?? false}
+            loading={handsLoading}
+            subtitle="Cumulative actual vs expected across all your sessions"
+          />
+
 
           {/* PnL Chart */}
           {chartData.length > 2 && (

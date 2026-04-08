@@ -29,7 +29,7 @@ export default function GameLibrary({
   selectedGroupId,
   onGroupsChanged,
 }: Props) {
-  const { user } = useAuth();
+  const { user, username } = useAuth();
   const [games, setGames] = useState<GameDoc[]>([]);
   const [myPnlByGame, setMyPnlByGame] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -126,11 +126,11 @@ export default function GameLibrary({
     if (!user) return;
     const trimmed = newGroupName.trim();
     if (!trimmed) return;
-    const groupId = await createGroup(user.uid, trimmed);
+    const groupId = await createGroup(user.uid, trimmed, username ?? '');
     await addGameToGroup(groupId, gameId);
     setNewGroupName('');
     onGroupsChanged();
-  }, [user, newGroupName, onGroupsChanged]);
+  }, [user, username, newGroupName, onGroupsChanged]);
 
   if (loading) {
     return (

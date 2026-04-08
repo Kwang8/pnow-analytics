@@ -7,7 +7,7 @@ import {
 
 import { useAuth } from '../lib/AuthContext';
 import { claimPlayer } from '../lib/gameStore';
-import { User, Check, Loader2 } from 'lucide-react';
+import { User, Check, Loader2, RefreshCw } from 'lucide-react';
 
 interface Props {
   stats: OverallStats;
@@ -15,6 +15,8 @@ interface Props {
   gameId?: string | null;
   claimMap?: Map<string, string | null>;
   onClaimed?: (pokerNowPlayerId: string) => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 function getPlayerStyle(vpip: number, pfr: number): { label: string; category: string } {
@@ -58,7 +60,7 @@ function ScatterTooltip({ active, payload }: any) {
   );
 }
 
-export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, onClaimed }: Props) {
+export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, onClaimed, onRefresh, refreshing }: Props) {
   const { user } = useAuth();
   const [claiming, setClaiming] = useState<string | null>(null);
   const scatterData = useMemo(() =>
@@ -83,6 +85,23 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, o
 
   return (
     <div className="space-y-6">
+      {/* Header with refresh */}
+      {onRefresh && (
+        <div className="flex items-center justify-end -mb-2">
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs px-2.5 py-1.5 rounded-md hover:bg-bg-hover transition-colors disabled:opacity-50"
+            title="Re-derive stats from raw hand history"
+          >
+            {refreshing
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <RefreshCw className="w-3.5 h-3.5" />}
+            {refreshing ? 'Refreshing…' : 'Refresh stats'}
+          </button>
+        </div>
+      )}
+
       {/* Session Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <div className="bg-bg-card border border-border rounded-lg p-4">

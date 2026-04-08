@@ -191,15 +191,21 @@ export default function App() {
       setContentView('overall');
       setSidebarOpen(false);
       loadClaims(gameId);
-
-      // Background refresh: re-derive stored summaries from raw data
-      refreshGame(gameId).then(() => {
-        setRefreshKey(k => k + 1);
-      }).catch(err => {
-        console.error('Failed to refresh game:', err);
-      });
     }
   }, [loadClaims]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefreshGame = useCallback(async () => {
+    if (!currentGameId || refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshGame(currentGameId);
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      console.error('Failed to refresh game:', err);
+    }
+    setRefreshing(false);
+  }, [currentGameId, refreshing]);
 
   const handleSelectPlayer = useCallback((id: string) => {
     setSelectedPlayerId(id);
@@ -449,6 +455,8 @@ export default function App() {
                   onSelectPlayer={handleSelectPlayer}
                   gameId={currentGameId}
                   claimMap={currentGameId ? claimedMap.get(currentGameId) : undefined}
+                  onRefresh={currentGameId && !isSharedView ? handleRefreshGame : undefined}
+                  refreshing={refreshing}
                   onClaimed={(id) => {
                     if (!currentGameId || !user) return;
                     setClaimedMap(prev => {

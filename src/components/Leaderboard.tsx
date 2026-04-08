@@ -1,21 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { getAllPlayerStats, type LeaderboardEntry } from '../lib/gameStore';
-import { Loader2, Trophy } from 'lucide-react';
+import { getPublicProfiles, type PublicProfile } from '../lib/gameStore';
+import { Loader2, Trophy, Lock, ArrowLeft } from 'lucide-react';
 
 export default function Leaderboard() {
-  const { user } = useAuth();
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const { user, isPublic } = useAuth();
+  const [profiles, setProfiles] = useState<PublicProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<PublicProfile | null>(null);
+
+  const load = useCallback(() => {
+    if (!isPublic) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    getPublicProfiles()
+      .then(setProfiles)
+      .catch(err => console.error('Failed to load leaderboard:', err))
+      .finally(() => setLoading(false));
+  }, [isPublic]);
 
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    getAllPlayerStats(user.uid).then(data => {
-      setEntries(data);
-      setLoading(false);
-    });
-  }, [user]);
+    load();
+  }, [load]);
+
+  if (!isPublic) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <Lock className="w-10 h-10 text-text-muted mb-3" />
+        <h2 className="text-xl font-bold text-text-primary mb-1">Leaderboard is public-only</h2>
+        <p className="text-text-secondary text-sm max-w-sm">
+          Make your profile public from the My Stats page to see other public players and be listed here yourself.
+        </p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -26,6 +46,10 @@ export default function Leaderboard() {
     );
   }
 
+  if (selected) {
+    return <ProfileDetail profile={selected} onBack={() => setSelected(null)} />;
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -33,12 +57,12 @@ export default function Leaderboard() {
           <Trophy className="w-6 h-6 text-yellow-500" />
           Leaderboard
         </h2>
-        <p className="text-text-secondary text-sm">Global P&L rankings across all players</p>
+        <p className="text-text-secondary text-sm">Public player rankings — click a row to view details</p>
       </div>
 
-      {entries.length === 0 ? (
+      {profiles.length === 0 ? (
         <div className="text-center py-12 text-text-muted text-sm">
-          No player data yet. Upload games and link players to populate the leaderboard.
+          No public profiles yet. You're the first!
         </div>
       ) : (
         <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
@@ -54,55 +78,48 @@ export default function Leaderboard() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry, i) => {
-                const isMe = user?.uid === entry.uid;
-                const pnlDollars = entry.totalPnlCents / 100;
-                const winRate = entry.sessions > 0
-                  ? ((entry.wins / entry.sessions) * 100).toFixed(0)
-                  : '0';
+              {profiles.map((p, i) => {
+                const isMe = user?.uid === p.uid;
+                const agg = p.aggregate;
+                const pnlDollars = (agg?.totalPnlCents ?? 0) / 100;
+                const winRate = agg && agg.sessions > 0 ? ((agg.wins / agg.sessions) * 100).toFixed(0) : '—';
                 return (
                   <tr
-                    key={entry.uid}
-                    className={`border-b border-border/50 ${isMe ? 'bg-accent/10' : ''}`}
+                    key={p.uid}
+                    onClick={() => setSelected(p)}
+                    className={`border-b border-border/50 cursor-pointer hover:bg-bg-hover transition-colors ${isMe ? 'bg-accent/10' : ''}`}
                   >
                     <td className="p-3 text-text-muted font-mono">
                       {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
                     </td>
                     <td className="p-3">
                       <div className="flex items-center gap-2">
-                        {entry.photoURL ? (
-                          <img
-                            src={entry.photoURL}
-                            alt=""
-                            className="w-6 h-6 rounded-full"
-                          />
+                        {p.photoURL ? (
+                          <img src={p.photoURL} alt="" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
                         ) : (
                           <div className="w-6 h-6 rounded-full bg-bg-hover flex items-center justify-center text-text-muted text-xs">
-                            {entry.displayName[0]?.toUpperCase() ?? '?'}
+                            {(p.username || p.displayName || '?')[0]?.toUpperCase()}
                           </div>
                         )}
                         <div className="min-w-0">
                           <div className={`font-medium truncate ${isMe ? 'text-accent' : 'text-text-primary'}`}>
-                            @{entry.username || 'unknown'}
+                            @{p.username || 'unknown'}
                             {isMe && <span className="text-xs ml-1 text-accent/70">(you)</span>}
                           </div>
-                          {entry.username === 'wang' && (
-                            <div className="text-[10px] text-text-muted italic">running cold, actually plays 50BB/hr above EV</div>
-                          )}
                         </div>
                       </div>
                     </td>
                     <td className="p-3 text-right font-mono text-text-secondary">
-                      {entry.sessions}
+                      {agg?.sessions ?? '—'}
                     </td>
                     <td className="p-3 text-right font-mono text-text-secondary hidden md:table-cell">
-                      {entry.totalHands.toLocaleString()}
+                      {agg ? agg.totalHands.toLocaleString() : '—'}
                     </td>
                     <td className="p-3 text-right font-mono text-text-secondary">
-                      {winRate}%
+                      {winRate}{agg ? '%' : ''}
                     </td>
                     <td className={`p-3 text-right font-mono font-bold ${pnlDollars >= 0 ? 'text-stat-green' : 'text-stat-red'}`}>
-                      {pnlDollars >= 0 ? '+' : ''}${Math.abs(pnlDollars).toFixed(2)}
+                      {agg ? `${pnlDollars >= 0 ? '+' : ''}$${Math.abs(pnlDollars).toFixed(2)}` : '—'}
                     </td>
                   </tr>
                 );
@@ -110,6 +127,79 @@ export default function Leaderboard() {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileDetail({ profile, onBack }: { profile: PublicProfile; onBack: () => void }) {
+  const agg = profile.aggregate;
+  const pnlDollars = (agg?.totalPnlCents ?? 0) / 100;
+  const pnlColor = pnlDollars >= 0 ? 'text-stat-green' : 'text-stat-red';
+  const winRate = agg && agg.sessions > 0 ? (agg.wins / agg.sessions) * 100 : 0;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <button onClick={onBack} className="text-text-muted hover:text-text-primary text-sm mb-2 flex items-center gap-1 transition-colors">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to leaderboard
+        </button>
+        <div className="flex items-center gap-3">
+          {profile.photoURL ? (
+            <img src={profile.photoURL} alt="" className="w-12 h-12 rounded-full" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-accent/20 text-accent text-lg flex items-center justify-center font-bold">
+              {(profile.username || profile.displayName || '?')[0]?.toUpperCase()}
+            </div>
+          )}
+          <div>
+            <h2 className="text-2xl font-bold text-text-primary">@{profile.username || 'unknown'}</h2>
+            <p className="text-text-secondary text-sm">{profile.displayName}</p>
+          </div>
+        </div>
+      </div>
+
+      {!agg ? (
+        <div className="text-center py-12 text-text-muted text-sm">
+          This player has not uploaded any games yet.
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Sessions</div>
+              <div className="font-mono text-2xl font-bold text-text-primary">{agg.sessions}</div>
+              <div className="text-text-muted text-xs">{agg.wins}W / {agg.sessions - agg.wins}L</div>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Total Hands</div>
+              <div className="font-mono text-2xl font-bold text-text-primary">{agg.totalHands.toLocaleString()}</div>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Total P&L</div>
+              <div className={`font-mono text-2xl font-bold ${pnlColor}`}>
+                {pnlDollars >= 0 ? '+' : ''}${Math.abs(pnlDollars).toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Win Rate</div>
+              <div className={`font-mono text-2xl font-bold ${winRate >= 50 ? 'text-stat-green' : 'text-stat-red'}`}>
+                {winRate.toFixed(0)}%
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Avg VPIP</div>
+              <div className="font-mono text-xl font-bold text-text-primary">{agg.avgVpip.toFixed(1)}%</div>
+            </div>
+            <div className="bg-bg-card border border-border rounded-lg p-4">
+              <div className="text-text-muted text-xs uppercase tracking-wider">Avg PFR</div>
+              <div className="font-mono text-xl font-bold text-text-primary">{agg.avgPfr.toFixed(1)}%</div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

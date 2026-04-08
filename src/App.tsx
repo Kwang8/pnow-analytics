@@ -4,7 +4,7 @@ import { analyzePlayer, analyzeOverall } from './lib/analysis';
 import { decodeShareData, getShareDataFromUrl } from './lib/share';
 import {
   saveGame, getGameRawData, findExistingGame, getGameClaims, refreshGame,
-  getMyGroups, createGroup, deleteGroup,
+  getMyGroups, createGroup, deleteGroup, updateMyAggregate,
   type GroupDoc,
 } from './lib/gameStore';
 import { useAuth } from './lib/AuthContext';
@@ -158,6 +158,8 @@ export default function App() {
           setCurrentGameId(id);
           setRefreshKey(k => k + 1);
         }
+        // Refresh denormalized aggregate for the public profile view
+        updateMyAggregate(user.uid).catch(err => console.error('Aggregate update failed:', err));
       } catch (e) {
         console.error('Failed to save game:', e);
       }
@@ -199,11 +201,14 @@ export default function App() {
     try {
       await refreshGame(currentGameId);
       setRefreshKey(k => k + 1);
+      if (user) {
+        updateMyAggregate(user.uid).catch(err => console.error('Aggregate update failed:', err));
+      }
     } catch (err) {
       console.error('Failed to refresh game:', err);
     }
     setRefreshing(false);
-  }, [currentGameId, refreshing]);
+  }, [currentGameId, refreshing, user]);
 
   const handleSelectPlayer = useCallback((id: string) => {
     setSelectedPlayerId(id);
@@ -453,6 +458,8 @@ export default function App() {
                       next.set(currentGameId, inner);
                       return next;
                     });
+                    // Claiming a new session changes the aggregate — refresh it
+                    updateMyAggregate(user.uid).catch(err => console.error('Aggregate update failed:', err));
                   }}
                 />
               </div>

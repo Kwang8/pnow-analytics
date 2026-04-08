@@ -1,6 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { getMyGamePlayerDocs, getGameRawData, getAllGamePlayers, getUserProfiles, type GamePlayerDoc } from '../lib/gameStore';
+import {
+  getMyGamePlayerDocs, getGameRawData, getAllGamePlayers, getUserProfiles,
+  setProfilePublic, updateMyAggregate,
+  type GamePlayerDoc,
+} from '../lib/gameStore';
 import { analyzePlayer, computeOpponentStats, type OpponentStat } from '../lib/analysis';
 import type { HandResult, LeakHand } from '../lib/types';
 import PreflopRangesTab from './PreflopRangesTab';
@@ -8,7 +12,7 @@ import LeaksTab from './LeaksTab';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine,
 } from 'recharts';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Globe, Lock } from 'lucide-react';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function PnlTooltip({ active, payload, label }: any) {
@@ -25,7 +29,7 @@ function PnlTooltip({ active, payload, label }: any) {
 }
 
 export default function MyStats() {
-  const { user } = useAuth();
+  const { user, isPublic, setIsPublicLocal } = useAuth();
   const [docs, setDocs] = useState<GamePlayerDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [handResults, setHandResults] = useState<HandResult[]>([]);
@@ -33,6 +37,22 @@ export default function MyStats() {
   const [handsLoading, setHandsLoading] = useState(false);
   const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
   const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions'>('Rivals');
+  const [togglingPublic, setTogglingPublic] = useState(false);
+
+  const handleTogglePublic = useCallback(async () => {
+    if (!user || togglingPublic) return;
+    setTogglingPublic(true);
+    const next = !isPublic;
+    try {
+      // Always refresh denormalized aggregate before going public
+      await updateMyAggregate(user.uid);
+      await setProfilePublic(user.uid, next);
+      setIsPublicLocal(next);
+    } catch (e) {
+      console.error('Failed to toggle profile visibility:', e);
+    }
+    setTogglingPublic(false);
+  }, [user, isPublic, togglingPublic, setIsPublicLocal]);
 
   useEffect(() => {
     if (!user) return;
@@ -164,9 +184,28 @@ export default function MyStats() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-text-primary">My Stats</h2>
-        <p className="text-text-secondary text-sm">Aggregated across all your sessions</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-text-primary">My Stats</h2>
+          <p className="text-text-secondary text-sm">Aggregated across all your sessions</p>
+        </div>
+        <button
+          onClick={handleTogglePublic}
+          disabled={togglingPublic}
+          className={`shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${
+            isPublic
+              ? 'border-stat-green/40 text-stat-green bg-stat-green/10 hover:bg-stat-green/15'
+              : 'border-border text-text-muted hover:text-text-primary hover:bg-bg-hover'
+          }`}
+          title={isPublic ? 'Your aggregate stats are visible to other public profiles' : 'Make your aggregate stats visible to other public profiles'}
+        >
+          {togglingPublic
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : isPublic
+              ? <Globe className="w-3.5 h-3.5" />
+              : <Lock className="w-3.5 h-3.5" />}
+          {isPublic ? 'Public profile' : 'Private profile'}
+        </button>
       </div>
 
       {totalSessions === 0 ? (

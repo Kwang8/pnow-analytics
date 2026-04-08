@@ -8,7 +8,9 @@ interface AuthContextValue {
   loading: boolean;
   username: string | null;
   needsUsername: boolean;
+  isPublic: boolean;
   setUsernameLocal: (username: string) => void;
+  setIsPublicLocal: (isPublic: boolean) => void;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -18,7 +20,9 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   username: null,
   needsUsername: false,
+  isPublic: false,
   setUsernameLocal: () => {},
+  setIsPublicLocal: () => {},
   signIn: async () => {},
   signOut: async () => {},
 });
@@ -34,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [username, setUsername] = useState<string | null>(null);
   const [needsUsername, setNeedsUsername] = useState(false);
+  const [isPublic, setIsPublic] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -47,9 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           updatedAt: serverTimestamp(),
         }, { merge: true });
 
-        // Check if username exists
+        // Check if username + public flag exist
         const snap = await getDoc(doc(db, 'users', u.uid));
-        const existing = snap.data()?.username as string | undefined;
+        const data = snap.data() ?? {};
+        const existing = data.username as string | undefined;
         if (existing) {
           setUsername(existing);
           setNeedsUsername(false);
@@ -57,9 +63,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUsername(null);
           setNeedsUsername(true);
         }
+        setIsPublic(Boolean(data.isPublic));
       } else {
         setUsername(null);
         setNeedsUsername(false);
+        setIsPublic(false);
       }
       setLoading(false);
     });
@@ -79,8 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsUsername(false);
   };
 
+  const setIsPublicLocal = (next: boolean) => {
+    setIsPublic(next);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, username, needsUsername, setUsernameLocal, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, username, needsUsername, isPublic, setUsernameLocal, setIsPublicLocal, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

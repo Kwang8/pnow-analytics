@@ -228,6 +228,96 @@ export async function getMyGamePlayerDocs(uid: string): Promise<GamePlayerDoc[]>
   return snap.docs.map(d => d.data() as GamePlayerDoc);
 }
 
+// ─── Public Profile / Aggregate Stats ──────────────────────────────────
+
+export interface UserAggregate {
+  sessions: number;
+  totalHands: number;
+  totalPnlCents: number;
+  wins: number;
+  avgVpip: number;
+  avgPfr: number;
+}
+
+export interface PublicProfile {
+  uid: string;
+  username: string;
+  displayName: string;
+  photoURL: string;
+  aggregate?: UserAggregate;
+}
+
+export function computeAggregate(docs: GamePlayerDoc[]): UserAggregate {
+  const sessions = docs.length;
+  const totalHands = docs.reduce((s, d) => s + d.handsPlayed, 0);
+  const totalPnlCents = docs.reduce((s, d) => s + d.pnl, 0);
+  const wins = docs.filter(d => d.pnl > 0).length;
+  const avgVpip = sessions > 0 ? docs.reduce((s, d) => s + d.vpip, 0) / sessions : 0;
+  const avgPfr = sessions > 0 ? docs.reduce((s, d) => s + d.pfr, 0) / sessions : 0;
+  return { sessions, totalHands, totalPnlCents, wins, avgVpip, avgPfr };
+}
+
+/** Recomputes aggregate from the caller's gamePlayers docs and writes it
+ *  to their own user doc. No-op for unauthenticated users. */
+export async function updateMyAggregate(uid: string): Promise<void> {
+  const docs = await getMyGamePlayerDocs(uid);
+  const agg = computeAggregate(docs);
+  await updateDoc(doc(db, 'users', uid), {
+    aggregate: { ...agg, updatedAt: serverTimestamp() },
+  });
+}
+
+export async function setProfilePublic(uid: string, isPublic: boolean): Promise<void> {
+  await updateDoc(doc(db, 'users', uid), { isPublic });
+}
+
+export async function getPublicProfiles(): Promise<PublicProfile[]> {
+  const q = query(collection(db, 'users'), where('isPublic', '==', true));
+  const snap = await getDocs(q);
+  const profiles = snap.docs.map(d => {
+    const data = d.data() as {
+      username?: string;
+      displayName?: string;
+      photoURL?: string;
+      aggregate?: UserAggregate;
+    };
+    return {
+      uid: d.id,
+      username: data.username ?? '',
+      displayName: data.displayName ?? '',
+      photoURL: data.photoURL ?? '',
+      aggregate: data.aggregate,
+    };
+  });
+  // Sort by total P&L descending; profiles without aggregate go last
+  profiles.sort((a, b) => {
+    const ap = a.aggregate?.totalPnlCents ?? -Infinity;
+    const bp = b.aggregate?.totalPnlCents ?? -Infinity;
+    return bp - ap;
+  });
+  return profiles;
+}
+
+export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
+  const snap = await getDoc(doc(db, 'users', uid));
+  if (!snap.exists()) return null;
+  const data = snap.data() as {
+    username?: string;
+    displayName?: string;
+    photoURL?: string;
+    aggregate?: UserAggregate;
+    isPublic?: boolean;
+  };
+  if (!data.isPublic) return null;
+  return {
+    uid,
+    username: data.username ?? '',
+    displayName: data.displayName ?? '',
+    photoURL: data.photoURL ?? '',
+    aggregate: data.aggregate,
+  };
+}
+
 // ─── Username Utilities ─────────────────────────────────────────────────
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -297,76 +387,6 @@ export async function getGameClaims(gameId: string): Promise<Map<string, string 
     map.set(data.pokerNowId, data.uid);
   }
   return map;
-}
-
-// ─── Leaderboard: All Player Stats ──────────────────────────────────────
-
-export interface LeaderboardEntry {
-  uid: string;
-  displayName: string;
-  username: string;
-  photoURL: string;
-  totalPnlCents: number;
-  totalHands: number;
-  sessions: number;
-  wins: number;
-}
-
-export async function getAllPlayerStats(currentUid: string): Promise<LeaderboardEntry[]> {
-  // Get all games the current user is a member of
-  const gamesQ = query(collection(db, 'games'), where('members', 'array-contains', currentUid));
-  const gamesSnap = await getDocs(gamesQ);
-  const gameIds = gamesSnap.docs.map(d => d.id);
-
-  if (gameIds.length === 0) return [];
-
-  // Fetch all gamePlayers for those games (batched, Firestore 'in' max 30)
-  const allGpDocs: GamePlayerDoc[] = [];
-  for (let i = 0; i < gameIds.length; i += 30) {
-    const batch = gameIds.slice(i, i + 30);
-    const gpQ = query(collection(db, 'gamePlayers'), where('gameId', 'in', batch));
-    const gpSnap = await getDocs(gpQ);
-    allGpDocs.push(...gpSnap.docs.map(d => d.data() as GamePlayerDoc));
-  }
-
-  // Aggregate per uid (only linked players)
-  const agg = new Map<string, { totalPnlCents: number; totalHands: number; sessions: number; wins: number }>();
-  for (const gp of allGpDocs) {
-    if (!gp.uid) continue;
-    const prev = agg.get(gp.uid) ?? { totalPnlCents: 0, totalHands: 0, sessions: 0, wins: 0 };
-    prev.totalPnlCents += gp.pnl;
-    prev.totalHands += gp.handsPlayed;
-    prev.sessions += 1;
-    if (gp.pnl > 0) prev.wins += 1;
-    agg.set(gp.uid, prev);
-  }
-
-  if (agg.size === 0) return [];
-
-  // Fetch user profiles
-  const uids = [...agg.keys()];
-  const entries: LeaderboardEntry[] = [];
-
-  for (let i = 0; i < uids.length; i += 30) {
-    const batch = uids.slice(i, i + 30);
-    const uq = query(collection(db, 'users'), where('__name__', 'in', batch));
-    const uSnap = await getDocs(uq);
-    for (const ud of uSnap.docs) {
-      const profile = ud.data() as { displayName?: string; username?: string; photoURL?: string };
-      const stats = agg.get(ud.id)!;
-      entries.push({
-        uid: ud.id,
-        displayName: profile.displayName ?? 'Unknown',
-        username: profile.username ?? '',
-        photoURL: profile.photoURL ?? '',
-        ...stats,
-      });
-    }
-  }
-
-  // Sort by PnL descending
-  entries.sort((a, b) => b.totalPnlCents - a.totalPnlCents);
-  return entries;
 }
 
 // ─── Batch-load all gamePlayers for given games ─────────────────────────

@@ -1027,31 +1027,64 @@ export function computeOpponentStats(data: PokerNowExport, playerId: string): Op
     const hero = hand.players.find(p => p.id === playerId);
     if (!hero) continue;
 
-    const heroNet = getNetResult(hand, hero.seat);
+    // Precompute every seated player's net in this hand once.
+    const nets = new Map<number, number>();
+    for (const p of hand.players) {
+      nets.set(p.seat, getNetResult(hand, p.seat));
+    }
+    const heroNet = nets.get(hero.seat) ?? 0;
 
-    // Find opponents who put money in
-    const oppsWithMoney = new Set<string>();
+    // Total won across all winners (== total lost across all losers).
+    // Used to distribute each loser's contribution proportionally among
+    // the winners they paid out to.
+    let totalWon = 0;
+    for (const net of nets.values()) {
+      if (net > 0) totalWon += net;
+    }
+
+    // Seats that voluntarily put money in during this hand. Only these
+    // count as having "played" against the hero.
+    const seatsWithMoney = new Set<number>();
     for (const e of hand.events) {
       const p = e.payload;
       if ('seat' in p && MONEY_IN_TYPES.includes(p.type)) {
-        const seat = (p as { seat: number }).seat;
-        if (seat !== hero.seat) {
-          const opp = hand.players.find(pl => pl.seat === seat);
-          if (opp) oppsWithMoney.add(opp.id);
-        }
+        seatsWithMoney.add((p as { seat: number }).seat);
       }
     }
 
-    for (const oppId of oppsWithMoney) {
-      const opp = hand.players.find(pl => pl.id === oppId)!;
-      const prev = acc.get(oppId) ?? { name: opp.name, handsPlayed: 0, netResult: 0 };
+    for (const seat of seatsWithMoney) {
+      if (seat === hero.seat) continue;
+      const opp = hand.players.find(pl => pl.seat === seat);
+      if (!opp) continue;
+      const oppNet = nets.get(seat) ?? 0;
+
+      const prev = acc.get(opp.id) ?? { name: opp.name, handsPlayed: 0, netResult: 0 };
       prev.handsPlayed++;
-      prev.netResult += heroNet;
-      acc.set(oppId, prev);
+
+      // Pair-wise pot settlement: only attribute the amount that actually
+      // flowed between hero and this opponent. When both won or both lost,
+      // no direct flow exists. When one won and the other lost, the
+      // loser's contribution is split among winners proportionally to
+      // each winner's share of the total pot.
+      if (totalWon > 0) {
+        if (heroNet > 0 && oppNet < 0) {
+          prev.netResult += (heroNet / totalWon) * (-oppNet);
+        } else if (heroNet < 0 && oppNet > 0) {
+          prev.netResult -= (oppNet / totalWon) * (-heroNet);
+        }
+      }
+      acc.set(opp.id, prev);
     }
   }
 
-  return Array.from(acc.entries()).map(([id, s]) => ({ id, ...s }));
+  // Round accumulated fractional cents to whole cents at the end so the
+  // UI formatter sees clean integers.
+  return Array.from(acc.entries()).map(([id, s]) => ({
+    id,
+    name: s.name,
+    handsPlayed: s.handsPlayed,
+    netResult: Math.round(s.netResult),
+  }));
 }
 
 // ─── Overall Session Stats ──────────────────────────────────────────────

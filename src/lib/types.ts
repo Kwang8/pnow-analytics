@@ -135,10 +135,13 @@ export interface HandResult {
   numPlayers: number;
   stackDepth: number;
   actions: ActionEntry[];
-  netResult: number;    // in cents
+  netResult: number;    // in cents — actual result
   netResultBB: number;
   bigBlind: number;
   wentToShowdown: boolean;
+  evNet: number;        // in cents — EV-adjusted result. Equals netResult
+                        // unless an all-in runout situation was detected.
+  hadAllInShowdown: boolean;
   leakType?: string;
 }
 

@@ -117,6 +117,20 @@ export default function App() {
     return null;
   }, [data, selectedPlayerId, isSharedView, sharedPlayerMap]);
 
+  // Hero's per-hand results for the current game (for the EV chart in OverallView).
+  // Requires a logged-in user who has claimed a seat in this game.
+  const heroHandResults = useMemo(() => {
+    if (!data || !user || !currentGameId) return null;
+    const claims = claimedMap.get(currentGameId);
+    if (!claims) return null;
+    let heroPokerNowId: string | null = null;
+    for (const [pokerNowId, uid] of claims) {
+      if (uid === user.uid) { heroPokerNowId = pokerNowId; break; }
+    }
+    if (!heroPokerNowId) return null;
+    return analyzePlayer(data, heroPokerNowId).handResults;
+  }, [data, user, currentGameId, claimedMap]);
+
   const handleFileSelected = useCallback(async (file: File) => {
     setUploadError(null);
     const text = await file.text();
@@ -449,6 +463,7 @@ export default function App() {
                   claimMap={currentGameId ? claimedMap.get(currentGameId) : undefined}
                   onRefresh={currentGameId && !isSharedView ? handleRefreshGame : undefined}
                   refreshing={refreshing}
+                  heroHandResults={heroHandResults}
                   onClaimed={(id) => {
                     if (!currentGameId || !user) return;
                     setClaimedMap(prev => {

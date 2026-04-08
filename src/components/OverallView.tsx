@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { OverallStats } from '../lib/types';
+import type { HandResult, OverallStats } from '../lib/types';
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
   ReferenceLine, ZAxis, Label, Tooltip,
@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../lib/AuthContext';
 import { claimPlayer } from '../lib/gameStore';
 import { User, Check, Loader2, RefreshCw } from 'lucide-react';
+import EvChart from './EvChart';
 
 interface Props {
   stats: OverallStats;
@@ -17,6 +18,8 @@ interface Props {
   onClaimed?: (pokerNowPlayerId: string) => void;
   onRefresh?: () => void;
   refreshing?: boolean;
+  /** Hero (logged-in user) hand-level results for this session, in chronological order. */
+  heroHandResults?: HandResult[] | null;
 }
 
 function getPlayerStyle(vpip: number, pfr: number): { label: string; category: string } {
@@ -60,7 +63,7 @@ function ScatterTooltip({ active, payload }: any) {
   );
 }
 
-export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, onClaimed, onRefresh, refreshing }: Props) {
+export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, onClaimed, onRefresh, refreshing, heroHandResults }: Props) {
   const { user } = useAuth();
   const [claiming, setClaiming] = useState<string | null>(null);
   const scatterData = useMemo(() =>
@@ -82,6 +85,24 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, o
     }),
     [stats]
   );
+
+  const evChart = useMemo(() => {
+    if (!heroHandResults || heroHandResults.length === 0) return null;
+    let cumActual = 0;
+    let cumEv = 0;
+    const points = [{ label: 'Start', actual: 0, ev: 0 }];
+    heroHandResults.forEach((h, i) => {
+      cumActual += h.netResult / 100;
+      cumEv += h.evNet / 100;
+      points.push({
+        label: `#${i + 1}`,
+        actual: Math.round(cumActual * 100) / 100,
+        ev: Math.round(cumEv * 100) / 100,
+      });
+    });
+    const hasAllInEvents = heroHandResults.some(h => h.hadAllInShowdown);
+    return { points, hasAllInEvents };
+  }, [heroHandResults]);
 
   return (
     <div className="space-y-6">
@@ -153,6 +174,15 @@ export default function OverallView({ stats, onSelectPlayer, gameId, claimMap, o
           );
         })()}
       </div>
+
+      {/* Hero EV chart (only when the logged-in user has claimed a seat in this session) */}
+      {evChart && (
+        <EvChart
+          points={evChart.points}
+          hasAllInEvents={evChart.hasAllInEvents}
+          subtitle="Your all-in luck in this session"
+        />
+      )}
 
       {/* Player Table */}
       <div className="bg-bg-card border border-border rounded-lg overflow-x-auto">

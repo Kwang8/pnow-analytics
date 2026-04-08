@@ -4,6 +4,7 @@ import {
   type HandResult, type ActionEntry, type LeakHand, type OverallStats,
   type EventPayload, EVT,
 } from './types';
+import { equity } from './equity';
 
 // ─── Position Calculation ───────────────────────────────────────────────
 
@@ -217,6 +218,144 @@ function getBoard(hand: Hand): string[] {
     }
   }
   return cards;
+}
+
+// ─── All-in EV detection ───────────────────────────────────────────────
+//
+// Find "all-in with runout" situations and compute the hero's EV-adjusted
+// net result for the hand. An all-in moment is the first point at which
+// every non-folded player has committed their entire starting stack. If
+// fewer than 5 community cards have been dealt at that moment, there is
+// variance to adjust for — we snapshot the board, collect the contestants'
+// known hole cards, and run a Monte-Carlo equity calc.
+
+interface HeroEvResult {
+  evNet: number;           // EV-adjusted net in cents
+  hadAllInShowdown: boolean;
+}
+
+function computeHeroEv(hand: Hand, heroSeat: number, actualNet: number): HeroEvResult {
+  const noEv: HeroEvResult = { evNet: actualNet, hadAllInShowdown: false };
+
+  const hero = hand.players.find(p => p.seat === heroSeat);
+  if (!hero) return noEv;
+
+  // Per-seat accumulators.
+  const startStack = new Map<number, number>();
+  const invested = new Map<number, number>();
+  const roundCommit = new Map<number, number>();
+  for (const p of hand.players) {
+    startStack.set(p.seat, p.stack);
+    invested.set(p.seat, 0);
+    roundCommit.set(p.seat, 0);
+  }
+  const folded = new Set<number>();
+  const boardBefore: string[] = [];
+
+  let allInMomentFound = false;
+  let allInBoard: string[] = [];
+
+  const flushRound = () => {
+    for (const [seat, v] of roundCommit) {
+      invested.set(seat, (invested.get(seat) ?? 0) + v);
+      roundCommit.set(seat, 0);
+    }
+  };
+
+  const remaining = (seat: number): number =>
+    (startStack.get(seat) ?? 0) - (invested.get(seat) ?? 0) - (roundCommit.get(seat) ?? 0);
+
+  const checkAllInReached = (): boolean => {
+    const stillIn = [...startStack.keys()].filter(s => !folded.has(s));
+    if (stillIn.length < 2) return false;
+    return stillIn.every(s => remaining(s) === 0);
+  };
+
+  const snapshotIfAllIn = () => {
+    if (!allInMomentFound && checkAllInReached()) {
+      allInMomentFound = true;
+      allInBoard = [...boardBefore];
+    }
+  };
+
+  for (const e of hand.events) {
+    const p = e.payload;
+
+    if (p.type === EVT.COMMUNITY) {
+      // Flush round, then check BEFORE adding new cards so the snapshot
+      // reflects the board state at the moment of commitment.
+      flushRound();
+      snapshotIfAllIn();
+      boardBefore.push(...(p as { cards: string[] }).cards);
+      continue;
+    }
+
+    const seat = 'seat' in p ? (p as { seat: number }).seat : -1;
+    if (seat < 0) continue;
+
+    if (p.type === EVT.FOLD) {
+      folded.add(seat);
+      snapshotIfAllIn();
+      continue;
+    }
+
+    if (([EVT.BB_POST, EVT.SB_POST, EVT.STRADDLE, EVT.MISSED_BLIND, EVT.CALL, EVT.BET_RAISE] as number[]).includes(p.type)) {
+      const value = (p as { value: number }).value;
+      roundCommit.set(seat, Math.max(roundCommit.get(seat) ?? 0, value));
+      snapshotIfAllIn();
+    }
+  }
+
+  flushRound();
+  snapshotIfAllIn();
+
+  if (!allInMomentFound) return noEv;
+  if (allInBoard.length >= 5) return noEv;          // full board already out — no variance
+  if (!hero.hand) return noEv;                       // hero's cards unknown
+  if (folded.has(heroSeat)) return noEv;             // hero not in the showdown
+
+  // All remaining contestants must have known hole cards.
+  const contestants = hand.players.filter(p => !folded.has(p.seat));
+  if (contestants.length < 2) return noEv;
+  if (contestants.some(p => !p.hand)) return noEv;
+
+  // Skip side-pot situations: require all contestants to have invested the
+  // same amount (after uncalled returns). Uneven investments mean side pots
+  // and our single-pot equity calc would be misleading.
+  const uncalledBySeat = new Map<number, number>();
+  for (const e of hand.events) {
+    if (e.payload.type === EVT.UNCALLED_RETURNED) {
+      const ev = e.payload as { seat: number; value: number };
+      uncalledBySeat.set(ev.seat, (uncalledBySeat.get(ev.seat) ?? 0) + ev.value);
+    }
+  }
+  const effInvest = (seat: number) => (invested.get(seat) ?? 0) - (uncalledBySeat.get(seat) ?? 0);
+  const heroEff = effInvest(heroSeat);
+  if (!contestants.every(p => effInvest(p.seat) === heroEff)) return noEv;
+
+  // Total contested pot = sum of POT_WON values (these exclude uncalled returns).
+  // Hero's actual share of the pot = POT_WON events for hero.
+  let totalPot = 0;
+  let heroPotWon = 0;
+  for (const e of hand.events) {
+    if (e.payload.type === EVT.POT_WON) {
+      const ev = e.payload as { seat: number; value: number };
+      totalPot += ev.value;
+      if (ev.seat === heroSeat) heroPotWon += ev.value;
+    }
+  }
+  if (totalPot <= 0) return noEv;
+
+  // Run Monte Carlo equity.
+  const holes = contestants.map(p => p.hand as [string, string]);
+  const heroIdx = contestants.findIndex(p => p.seat === heroSeat);
+  const equities = equity(holes, allInBoard);
+  const heroEquity = equities[heroIdx];
+
+  // evDelta replaces the lucky/unlucky POT_WON outcome with the expected
+  // share. evNet = actualNet - heroPotWon + heroEquity * totalPot.
+  const evNet = Math.round(actualNet - heroPotWon + heroEquity * totalPot);
+  return { evNet, hadAllInShowdown: true };
 }
 
 // ─── Preflop analysis helpers ───────────────────────────────────────────
@@ -474,6 +613,7 @@ function detectLeaks(hand: Hand, playerSeat: number, bb: number): LeakHand | nul
   const netResult = getNetResult(hand, playerSeat);
   const netBB = netResult / bb;
 
+  const leakEvResult = computeHeroEv(hand, playerSeat, netResult);
   const baseResult: Omit<LeakHand, 'leakType' | 'leakDescription'> = {
     handNumber: hand.number,
     holeCards: cards,
@@ -486,6 +626,8 @@ function detectLeaks(hand: Hand, playerSeat: number, bb: number): LeakHand | nul
     netResultBB: netBB,
     bigBlind: bb,
     wentToShowdown: playerWentToShowdown(hand, playerSeat),
+    evNet: leakEvResult.evNet,
+    hadAllInShowdown: leakEvResult.hadAllInShowdown,
   };
 
   // Bad cold call — called a raise with weak holdings
@@ -763,7 +905,8 @@ export function analyzePlayer(data: PokerNowExport, playerId: string): PlayerSta
     if (didRaisePreflop(hand, seat)) posStats[position].pfr++;
     posStats[position].netBB += netResult / bb;
 
-    // Hand result
+    // Hand result (with EV adjustment for all-in runouts)
+    const evResult = computeHeroEv(hand, seat, netResult);
     const hr: HandResult = {
       handNumber: hand.number,
       holeCards: player.hand as [string, string] | null,
@@ -776,6 +919,8 @@ export function analyzePlayer(data: PokerNowExport, playerId: string): PlayerSta
       netResultBB: netResult / bb,
       bigBlind: bb,
       wentToShowdown: wentToSD,
+      evNet: evResult.evNet,
+      hadAllInShowdown: evResult.hadAllInShowdown,
     };
     allResults.push(hr);
     posStats[position].handResults.push(hr);

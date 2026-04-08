@@ -9,6 +9,7 @@ import { analyzePlayer, computeOpponentStats, type OpponentStat } from '../lib/a
 import type { HandResult, LeakHand } from '../lib/types';
 import PreflopRangesTab from './PreflopRangesTab';
 import LeaksTab from './LeaksTab';
+import EvChart from './EvChart';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine,
 } from 'recharts';
@@ -36,6 +37,8 @@ export default function MyStats() {
   const [leaks, setLeaks] = useState<LeakHand[]>([]);
   const [handsLoading, setHandsLoading] = useState(false);
   const [opponents, setOpponents] = useState<{ name: string; handsPlayed: number; netResult: number }[]>([]);
+  // Per-session cumulative EV totals in cents, keyed by gameId.
+  const [sessionEvByGame, setSessionEvByGame] = useState<Map<string, number>>(new Map());
   const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions'>('Rivals');
   const [togglingPublic, setTogglingPublic] = useState(false);
 
@@ -85,6 +88,7 @@ export default function MyStats() {
       const allHands: HandResult[] = [];
       const allLeaks: LeakHand[] = [];
       const perGameOpponents: { gameId: string; stats: OpponentStat[] }[] = [];
+      const evByGame = new Map<string, number>();
 
       for (const entry of rawResults) {
         if (!entry) continue;
@@ -92,10 +96,15 @@ export default function MyStats() {
         allHands.push(...analysis.handResults);
         allLeaks.push(...analysis.leaks);
         perGameOpponents.push({ gameId: entry.gameId, stats: computeOpponentStats(entry.raw, entry.pokerNowId) });
+
+        // Sum per-hand EV-adjusted net for this session (cents).
+        const evSum = analysis.handResults.reduce((s, h) => s + h.evNet, 0);
+        evByGame.set(entry.gameId, evSum);
       }
 
       setHandResults(allHands);
       setLeaks(allLeaks);
+      setSessionEvByGame(evByGame);
 
       // Build claim map: (gameId, pokerNowId) → uid
       const claimMap = new Map<string, string>();
@@ -164,6 +173,31 @@ export default function MyStats() {
     });
     return points;
   }, [sorted]);
+
+  // Cumulative actual vs EV-adjusted by session. Only meaningful once
+  // hand-level analysis has populated sessionEvByGame.
+  const evChart = useMemo(() => {
+    if (sessionEvByGame.size === 0) return null;
+    let cumActual = 0;
+    let cumEv = 0;
+    const points = [{ label: 'Start', actual: 0, ev: 0 }];
+    sorted.forEach((d, i) => {
+      const evCents = sessionEvByGame.get(d.gameId) ?? d.pnl;
+      cumActual += d.pnl / 100;
+      cumEv += evCents / 100;
+      const date = d.gameDate
+        ? new Date(d.gameDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : `#${i + 1}`;
+      const label = sorted.length > 1 ? `${date} (#${i + 1})` : date;
+      points.push({
+        label,
+        actual: Math.round(cumActual * 100) / 100,
+        ev: Math.round(cumEv * 100) / 100,
+      });
+    });
+    const hasAllInEvents = handResults.some(h => h.hadAllInShowdown);
+    return { points, hasAllInEvents };
+  }, [sorted, sessionEvByGame, handResults]);
 
   const totalSessions = docs.length;
   const totalHands = docs.reduce((s, d) => s + d.handsPlayed, 0);
@@ -251,6 +285,15 @@ export default function MyStats() {
               <div className="font-mono text-xl font-bold text-text-primary">{avgPfr.toFixed(1)}%</div>
             </div>
           </div>
+
+          {/* EV Chart — actual vs expected across sessions */}
+          {evChart && !handsLoading && (
+            <EvChart
+              points={evChart.points}
+              hasAllInEvents={evChart.hasAllInEvents}
+              subtitle="Cumulative actual vs expected across all your sessions"
+            />
+          )}
 
           {/* PnL Chart */}
           {chartData.length > 2 && (

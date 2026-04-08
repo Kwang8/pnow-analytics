@@ -17,9 +17,8 @@ import GroupsList from './components/GroupsList';
 import MyStats from './components/MyStats';
 import Leaderboard from './components/Leaderboard';
 import AuthButton from './components/AuthButton';
-import AddFriend from './components/AddFriend';
 import NewGameModal from './components/NewGameModal';
-import { Share2, Check, BarChart3, Trophy, UserPlus, Plus, Loader2, Menu, X } from 'lucide-react';
+import { Share2, Check, BarChart3, Trophy, Plus, Loader2, Menu, X } from 'lucide-react';
 
 type ContentView = 'empty' | 'overall' | 'player' | 'mystats' | 'leaderboard';
 
@@ -38,7 +37,6 @@ export default function App() {
   // Saved game tracking
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showAddFriend, setShowAddFriend] = useState(false);
   const [showNewGame, setShowNewGame] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // Map of gameId -> (pokerNowId -> uid | null)
@@ -215,7 +213,6 @@ export default function App() {
   const handleBackToOverall = useCallback(() => {
     setContentView('overall');
     setSelectedPlayerId(null);
-    setShowAddFriend(false);
   }, []);
 
   const handleShare = useCallback(() => {
@@ -272,13 +269,6 @@ export default function App() {
         >
           <Plus className="w-4 h-4" />
           New Game
-        </button>
-        <button
-          onClick={() => setShowAddFriend(true)}
-          className="w-full flex items-center justify-center gap-2 bg-stat-green hover:bg-stat-green/85 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
-        >
-          <UserPlus className="w-4 h-4" />
-          Add Friend
         </button>
         <button
           onClick={() => { setContentView('mystats'); setSidebarOpen(false); }}
@@ -356,9 +346,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-bg-primary flex flex-col">
       {fileInput}
-      {showAddFriend && (
-        <AddFriend onDone={() => { setShowAddFriend(false); setRefreshKey(k => k + 1); }} />
-      )}
       {showNewGame && (
         <NewGameModal
           onFileSelected={(file) => { setShowNewGame(false); handleFileSelected(file); }}

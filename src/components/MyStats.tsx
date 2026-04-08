@@ -49,6 +49,20 @@ export default function MyStats() {
   const [allInHands, setAllInHands] = useState<AllInHandRow[]>([]);
   const [activeTab, setActiveTab] = useState<'Ranges' | 'Leaks' | 'Rivals' | 'Sessions' | 'All-Ins'>('Rivals');
   const [togglingPublic, setTogglingPublic] = useState(false);
+  // Small-favor tribute modal — dismissed per-session so it only
+  // shows once per browser tab lifetime.
+  const [showTribute, setShowTribute] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return sessionStorage.getItem('pnow-wang-tribute-dismissed') !== 'true';
+  });
+  const dismissTribute = useCallback(() => {
+    setShowTribute(false);
+    try {
+      sessionStorage.setItem('pnow-wang-tribute-dismissed', 'true');
+    } catch {
+      // sessionStorage may be unavailable (private mode, etc.) — no-op.
+    }
+  }, []);
 
   const handleTogglePublic = useCallback(async () => {
     if (!user || togglingPublic) return;
@@ -514,6 +528,36 @@ export default function MyStats() {
           )}
         </>
       )}
+
+      {showTribute && <TributeModal onDismiss={dismissTribute} />}
+    </div>
+  );
+}
+
+// ─── Tribute Modal ─────────────────────────────────────────────────────
+
+function TributeModal({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onDismiss} />
+      <div className="relative bg-bg-card border border-border rounded-lg p-6 w-full max-w-md mx-4 space-y-4 shadow-2xl">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl" style={{ color: '#e2e8f0' }}>♠</span>
+          <h3 className="text-text-primary text-lg font-bold">A small favor</h3>
+        </div>
+        <p className="text-text-secondary text-sm leading-relaxed">
+          Enjoying the analytics? Small ask from your developer — please don't
+          3-bet <span className="text-accent font-semibold">@wang</span> at the
+          table, and kindly let him see a flop on the cheap. It's the only
+          payment he accepts. 🙏
+        </p>
+        <button
+          onClick={onDismiss}
+          className="w-full py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent/80 transition-colors"
+        >
+          You got it
+        </button>
+      </div>
     </div>
   );
 }

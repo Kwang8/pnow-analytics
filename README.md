@@ -1,73 +1,55 @@
-# React + TypeScript + Vite
+# PokerScope
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Poker Now hand history analyzer with Firebase-backed game storage and a Tampermonkey sync flow.
 
-Currently, two official plugins are available:
+## Local app
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## PokerNow sync API
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+The Tampermonkey script in [pokernow-sync.user.js](/Users/vicky/Desktop/vzhang-git/pnow-analytics/pokernow-sync.user.js) posts the full `PokerNowExport` payload to `POST /api/pokernow/import`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The server endpoint:
+
+- validates the request and optional import key
+- checks that the configured player name exists in the uploaded game
+- de-dupes by PokerNow game id for the configured uploader
+- stores the compressed raw game in Firestore
+- auto-claims the matching player row for the configured user
+
+### Required environment variables
+
+Copy [.env.example](/Users/vicky/Desktop/vzhang-git/pnow-analytics/.env.example) and set:
+
+- `POKERNOW_IMPORT_UID`: your Firebase Auth user id
+- `POKERNOW_IMPORT_EMAIL`: email to store on imported games
+- `POKERNOW_IMPORT_KEY`: shared secret used by the userscript
+
+For Firebase Admin credentials, use one of:
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `FIREBASE_ADMIN_PROJECT_ID` + `FIREBASE_ADMIN_CLIENT_EMAIL` + `FIREBASE_ADMIN_PRIVATE_KEY`
+
+### Vercel
+
+Set the variables above in your Vercel project settings before deploying. The import endpoint lives at:
+
+```text
+/api/pokernow/import
 ```
+
+## Tampermonkey setup
+
+1. Install the script from [pokernow-sync.user.js](/Users/vicky/Desktop/vzhang-git/pnow-analytics/pokernow-sync.user.js).
+2. In the Tampermonkey menu, set:
+3. `Tracker app URL`
+4. `PokerNow player name`
+5. `Optional import key`
+
+Then open a PokerNow game and click `Sync to Tracker`.
+
+The script now tries to discover the in-page PokerNow export object and upload it directly, so you do not need to manually download the JSON first.
